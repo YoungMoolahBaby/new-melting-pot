@@ -1,0 +1,19 @@
+new-melting-pot
+Copyright 2026 the new-melting-pot contributors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project builds on two projects that are also under the Apache License 2.0.
+
+Melting Pot (https://github.com/google-deepmind/meltingpot)
+Copyright 2022 DeepMind Technologies Limited.
+- sims/town/spec.py holds a copy of Melting Pot's Clean Up map.
+- sims/town/lua/clean_up_town/ is a new level. It loads Melting Pot's Clean Up components and
+  follows the shape of Melting Pot's clean_up/init.lua.
+- sims/jaxtown/cleanup.py re-implements Melting Pot's Clean Up rules in JAX.
+
+SocialJax (https://github.com/cooperativex/SocialJax; Guo et al., ICLR 2026)
+- sims/jaxtown/third_party/socialjax/ holds five SocialJax files, unchanged, with SocialJax's
+  licence; its SOURCE.md names the commit they were copied from.
+- sims/jaxtown/cleanup.py was built from SocialJax's Clean Up and changed to follow Melting Pot's
+  rules. Its docstring lists the changes.

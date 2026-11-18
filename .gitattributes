@@ -1,0 +1,4 @@
+# Scripts run inside WSL (Linux); keep them LF even if Git on Windows checks out CRLF.
+*.sh  text eol=lf
+*.lua text eol=lf
+*.py  text eol=lf
