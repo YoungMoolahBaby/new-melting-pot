@@ -32,6 +32,7 @@ import json
 import os
 import pickle
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -128,6 +129,8 @@ class Runner:
         self.r_sync = f"{remote_root}/_sync"
         self.r_argv = remote_argv(train_argv, self.r_out)
         self.commit, self.do_setup = commit, setup
+        # Machine logs are named after the session, so two runners can share --out-root.
+        self.log_prefix = f"train_{cli.session}_" if getattr(cli, "session", None) else "train_"
         self.machines = self.crashes = 0
         self.alive = False
         os.makedirs(self.local, exist_ok=True)
@@ -144,6 +147,10 @@ class Runner:
 
     def run_dir(self, name):
         return os.path.join(self.local, name)
+
+    def machine_log(self):
+        """This PC's copy of the current machine's train log."""
+        return os.path.join(self.local, f"{self.log_prefix}machine{self.machines}.log")
 
     def local_steps(self, name):
         """Steps in this PC's copy of the run's checkpoint (0 if none)."""
@@ -289,7 +296,7 @@ print("STATUS " + json.dumps(st))
                         self.seen[f"{name}/{f}"] = meta
         self.sync_episodes()
         self.fetch(f"{self.r_out}/train.log",
-                   os.path.join(self.local, f"train_machine{self.machines}.log"))
+                   self.machine_log())
         done = {n: self.local_steps(n)[0] for n in self.runs}
         self.say("  copied here: " + ", ".join(f"{n} {s:,}" for n, s in done.items()))
         return done
@@ -415,7 +422,7 @@ print("CHUNKS " + json.dumps(res))
                     return done
                 self.crashes += 1
                 self.say(f"training stopped on the machine ({state}); last log lines:")
-                log = os.path.join(self.local, f"train_machine{self.machines}.log")
+                log = self.machine_log()
                 if os.path.exists(log):
                     for line in open(log).read().splitlines()[-8:]:
                         self.say("    " + clean(line, 200))
@@ -432,7 +439,10 @@ print("CHUNKS " + json.dumps(res))
                     pass
             raise
         finally:
+            was_alive = self.alive
             self.stop_machine()
+            if not was_alive:
+                self.cli.stop()   # stopped while a new machine was starting: don't leave it
             self.log_f.close()
 
 
@@ -452,7 +462,18 @@ def pushed_commit():
     return head
 
 
+def stop_on_signals():
+    """Ctrl-C and `kill` stop the runner the careful way (copy back, stop the machine).
+    Needed when it runs in the background: a shell starts background jobs with Ctrl-C
+    ignored, and plain `kill` would end it without stopping the Colab machine."""
+    def stop(signum, frame):
+        raise KeyboardInterrupt(f"signal {signum}")
+    signal.signal(signal.SIGINT, stop)
+    signal.signal(signal.SIGTERM, stop)
+
+
 def main(argv=None):
+    stop_on_signals()
     argv = sys.argv[1:] if argv is None else argv
     if "--" not in argv:
         raise SystemExit("usage: colab_runner.py [options] -- <train_jax.py arguments>")

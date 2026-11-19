@@ -152,6 +152,20 @@ def test_the_machine_gets_its_own_folder_resume_and_5_minute_checkpoints():
     assert "5" not in cr.remote_argv(["--ckpt-minutes=2", "--out-root=a"], "/b")
 
 
+def test_kill_or_ctrl_c_stops_it_the_careful_way_even_in_the_background():
+    script = (f"import sys, time; sys.path.insert(0, {HERE!r}); import colab_runner as cr\n"
+              "cr.stop_on_signals(); print('ready', flush=True)\n"
+              "try:\n    time.sleep(60)\nexcept KeyboardInterrupt:\n    print('careful stop')\n")
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        # As a shell starts a background job: Ctrl-C ignored to begin with.
+        p = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE, text=True,
+                             preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN))
+        assert p.stdout.readline().strip() == "ready"
+        p.send_signal(sig)
+        out, _ = p.communicate(timeout=30)
+        assert "careful stop" in out
+
+
 def test_logs_never_show_an_email_address():
     assert cr.clean("[colab] signed in as some.one+x@example.com ok") == (
         "[colab] signed in as <account> ok")
