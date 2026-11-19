@@ -36,6 +36,10 @@ the 147 river cells only; independent random draws for apples, dirt and spawning
 or a multiple of 100 after it, 20% each time, at most 5,000); each player's own
 apples (SocialJax shares by default); river starts; the four towns.
 
+One rule of our own, off by default: town(dirt="capped") stops dirt arriving while 40%
+or more of the river is dirty, as the open Sequential Social Dilemma Games Cleanup does
+(spec.DIRT_RULES). Melting Pot's dirt keeps coming until the river is full.
+
 Known simplifications, kept small: zap beams all fire before clean beams (Melting
 Pot interleaves them in random order); while out, a zapped player still sees the
 live world from where they were hit (what Melting Pot shows an off-board player is
@@ -120,6 +124,7 @@ class Town(struct.PyTreeNode):
     badge_frames: jnp.ndarray   # int
     start_dirt: jnp.ndarray     # [R] bool: which river cells start dirty
     dirt_spawns: jnp.ndarray    # bool: False on the clean river (sanity check)
+    dirt_cap: jnp.ndarray       # float: no new dirt while this share is dirty (1.0: never stops)
 
 
 class State(struct.PyTreeNode):
@@ -197,11 +202,13 @@ class CleanUp:
 
     def town(self, name: str = "neighbours", river: str | None = "melting_pot",
              feed_reward: float = spec.FEED_REWARD, feed_period: int = spec.FEED_PERIOD,
-             badge_frames: int = spec.BADGE_FRAMES) -> Town:
+             badge_frames: int = spec.BADGE_FRAMES, dirt: str = "melting_pot") -> Town:
         """Settings for one of spec.TOWNS. `river=None` keeps the dirt drawn in the
-        map rows given to the constructor (for test maps)."""
+        map rows given to the constructor (for test maps). `dirt`: one of spec.DIRT_RULES."""
         if name not in spec.TOWNS:
             raise ValueError(f"town must be one of {spec.TOWNS}, not {name!r}")
+        if dirt not in spec.DIRT_RULES:
+            raise ValueError(f"dirt must be one of {spec.DIRT_RULES}, not {dirt!r}")
         if river is None:
             start = self._start_dirt_rows
         else:
@@ -214,7 +221,8 @@ class CleanUp:
                     feed_period=jnp.asarray(feed_period, jnp.int32),
                     badge_frames=jnp.asarray(badge_frames, jnp.int32),
                     start_dirt=jnp.asarray(start),
-                    dirt_spawns=jnp.asarray(river != "clean"))
+                    dirt_spawns=jnp.asarray(river != "clean"),
+                    dirt_cap=jnp.asarray(spec.DIRT_CAP[dirt], jnp.float32))
 
     # --- reset and step -----------------------------------------------------------
 
@@ -384,8 +392,9 @@ class CleanUp:
         if self.num_river:
             k_spawn, k_cell = jax.random.split(k_dirt)
             clean_cells = ~dirt
+            # (frac < 1.0 is the same as "any cell clean": Melting Pot's rule unchanged.)
             spawn = (town.dirt_spawns & (frame > DIRT_DELAY) & clean_cells.any()
-                     & (jax.random.uniform(k_spawn) < DIRT_PROB))
+                     & (frac < town.dirt_cap) & (jax.random.uniform(k_spawn) < DIRT_PROB))
             cell = jax.random.choice(k_cell, self.num_river,
                                      p=clean_cells / jnp.maximum(clean_cells.sum(), 1))
             dirt = dirt.at[cell].set(dirt[cell] | spawn)

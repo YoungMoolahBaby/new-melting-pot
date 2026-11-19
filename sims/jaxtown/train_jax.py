@@ -40,9 +40,13 @@ import spec  # noqa: E402
 import train as town_train  # noqa: E402  (sims/town/train.py: shared flags, logs, checks)
 from envs import episode_summary  # noqa: E402
 
-PLAYERS, METRIC_FIELDS = town_train.PLAYERS, town_train.METRIC_FIELDS
-# Batch shape changes what's learned too.
-SAME_ON_RESUME = town_train.SAME_ON_RESUME + ("envs", "minibatches", "dtype")
+METRIC_FIELDS = town_train.METRIC_FIELDS
+# (alpha, beta) as sims/town/train.py, plus "shared" (JAX only): every player's reward is
+# the average of all seven players' apples, so anyone's apple counts for everyone.
+PLAYERS = {**town_train.PLAYERS, "shared": (0.0, 0.0)}
+SHARED = ("shared",)
+# Batch shape and the dirt rule change what's learned too.
+SAME_ON_RESUME = town_train.SAME_ON_RESUME + ("envs", "minibatches", "dtype", "dirt")
 # Per-player episode totals kept during a game: reward, apples, cleaned, zaps, feed,
 # sum of frames with a reward, number of frames with a reward.
 ACC = ("ret", "ate", "cleaned", "zaps", "feed", "t_reward", "n_reward")
@@ -51,7 +55,8 @@ ACC = ("ret", "ate", "cleaned", "zaps", "feed", "t_reward", "n_reward")
 def parse(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", nargs="+", default=None,
-                    help="town:players[:seed] ..., e.g. neighbours:selfish neighbours:fair")
+                    help="town:players[:seed[:dirt]] ..., e.g. neighbours:selfish "
+                         "neighbours:fair:0:capped (seed and dirt default to --seed, --dirt)")
     ap.add_argument("--town", choices=spec.TOWNS, default="neighbours")
     ap.add_argument("--players", choices=sorted(PLAYERS), default="selfish")
     ap.add_argument("--seed", type=int, default=0)
@@ -75,18 +80,23 @@ def parse(argv=None):
     ap.add_argument("--feed-period", type=int, default=spec.FEED_PERIOD)
     ap.add_argument("--badge-frames", type=int, default=spec.BADGE_FRAMES)
     ap.add_argument("--river", choices=spec.RIVERS, default="melting_pot")
+    ap.add_argument("--dirt", choices=spec.DIRT_RULES, default="melting_pot",
+                    help="how dirt arrives (spec.DIRT_RULES): melting_pot until the river is "
+                         "full, capped stops at 40%% dirty")
     ap.add_argument("--ckpt-minutes", type=float, default=10.0)
     ap.add_argument("--out-root", default=os.path.join("out", "jaxtown"))
     ap.add_argument("--out", default=None, help="exact output folder (one run only)")
     ap.add_argument("--resume", action="store_true")
     args = ap.parse_args(argv)
     args.specs = []
-    for s in args.runs or [f"{args.town}:{args.players}:{args.seed}"]:
+    for s in args.runs or [f"{args.town}:{args.players}:{args.seed}:{args.dirt}"]:
         parts = s.split(":")
-        if len(parts) < 2 or parts[0] not in spec.TOWNS or parts[1] not in PLAYERS:
-            ap.error(f"bad run {s!r}: write town:players[:seed], town in {spec.TOWNS}, "
-                     f"players in {sorted(PLAYERS)}")
-        args.specs.append((parts[0], parts[1], int(parts[2]) if len(parts) > 2 else args.seed))
+        if (not 2 <= len(parts) <= 4 or parts[0] not in spec.TOWNS or parts[1] not in PLAYERS
+                or (len(parts) == 4 and parts[3] not in spec.DIRT_RULES)):
+            ap.error(f"bad run {s!r}: write town:players[:seed[:dirt]], town in {spec.TOWNS}, "
+                     f"players in {sorted(PLAYERS)}, dirt in {spec.DIRT_RULES}")
+        args.specs.append((parts[0], parts[1], int(parts[2]) if len(parts) > 2 else args.seed,
+                           parts[3] if len(parts) > 3 else args.dirt))
     if args.out and len(args.specs) > 1:
         ap.error("--out names one folder; use --out-root with several runs")
     if args.envs % args.minibatches:
@@ -96,21 +106,29 @@ def parse(argv=None):
     return args
 
 
+def team_reward(reward, share):
+    """What each player is paid, [envs, players]: their own apples (and feed), or with
+    `share` the average of everyone's in that game."""
+    import jax.numpy as jnp
+    return jnp.where(share, reward.mean(-1, keepdims=True), reward)
+
+
 def make_train_step(env, learner, num_envs, rollout, ia_gamma, ia_lambda):
     """One compiled call: `rollout` steps in all games, then the PPO update."""
     import jax
     import jax.numpy as jnp
     import ppo
 
-    def train_step(rs, town, alpha, beta):
+    def train_step(rs, town, alpha, beta, share):
         def one_step(carry, _):
             es, obs, ready, start, h, smoothed, acc, fin, key = carry
             key, k_act, k_env = jax.random.split(key, 3)
             h2, a, logp, value, _ = learner._act(rs["params"], h, obs, ready, start, k_act)
             es, obs2, ready2, reward, done, info = jax.vmap(env.step, (0, 0, 0, None))(
                 jax.random.split(k_env, num_envs), es, a.T, town)
-            smoothed = ppo.smooth_rewards(smoothed, reward, ia_gamma, ia_lambda)
-            subjective = ppo.inequity_reward(reward, smoothed, alpha, beta)
+            paid = team_reward(reward, share)
+            smoothed = ppo.smooth_rewards(smoothed, paid, ia_gamma, ia_lambda)
+            subjective = ppo.inequity_reward(paid, smoothed, alpha, beta)
             smoothed = jnp.where(done[:, None], 0.0, smoothed)
             got = (reward > 0).astype(jnp.float32)
             acc = acc + jnp.stack([reward, info["ate"], info["cleaned"], info["zaps"],
@@ -151,19 +169,23 @@ class Run:
         import jax
         import jax.numpy as jnp
         self.jax, self.jnp = jax, jnp
-        self.town, self.players, self.seed = run_spec
+        self.town, self.players, self.seed, self.dirt = run_spec
         alpha, beta = PLAYERS[self.players]
         self.alpha = alpha if args.alpha is None else args.alpha
         self.beta = beta if args.beta is None else args.beta
-        self.name = f"{self.town}_{self.players}_s{self.seed}"
+        # (Melting Pot's dirt rule adds nothing to the name, so older runs still resume.)
+        self.name = f"{self.town}_{self.players}_s{self.seed}" + (
+            "" if self.dirt == "melting_pot" else f"_{self.dirt}")
         self.out = args.out or os.path.join(args.out_root, self.name)
         self.args, self.env, self.learner, self.train_step = args, env, learner, train_step
         town_train.check_folder(self.out, args, {"town": self.town, "players": self.players,
                                                  "seed": self.seed, "alpha": self.alpha,
-                                                 "beta": self.beta}, SAME_ON_RESUME)
+                                                 "beta": self.beta, "dirt": self.dirt},
+                                SAME_ON_RESUME)
         self.tw = env.town(self.town, args.river, args.feed_reward, args.feed_period,
-                           args.badge_frames)
-        self.ab = (jnp.float32(self.alpha), jnp.float32(self.beta))
+                           args.badge_frames, self.dirt)
+        self.reward_args = (jnp.float32(self.alpha), jnp.float32(self.beta),
+                            jnp.asarray(self.players in SHARED))
 
     def setup(self):
         jax, jnp, args, env = self.jax, self.jnp, self.args, self.env
@@ -183,7 +205,7 @@ class Run:
             params, opt = self.learner.init(k)
             config = {k: v for k, v in vars(args).items() if k not in ("specs", "runs")}
             config.update(game="jaxtown", town=self.town, players=self.players, seed=self.seed,
-                          alpha=self.alpha, beta=self.beta, num_envs=args.envs,
+                          dirt=self.dirt, alpha=self.alpha, beta=self.beta, num_envs=args.envs,
                           ppo=self.learner.cfg._asdict())
             with open(os.path.join(self.out, "config.json"), "w") as f:
                 json.dump(config, f, indent=2)
@@ -212,7 +234,7 @@ class Run:
     def dispatch(self):
         """Queue this run's next rollout + update on the GPU (returns at once). Until
         finish() logs it, the weights are one update ahead of the counters."""
-        self.rs, self.pending = self.train_step(self.rs, self.tw, *self.ab)
+        self.rs, self.pending = self.train_step(self.rs, self.tw, *self.reward_args)
         self.in_flight = True
 
     def wait(self):
@@ -269,7 +291,8 @@ def main(argv=None):
     runs = [Run(s, args, env, learner, train_step) for s in args.specs]
     for r in runs:
         r.setup()
-    print("runs:", ", ".join(f"{r.name} (alpha {r.alpha}, beta {r.beta})" for r in runs),
+    print("runs:", ", ".join(f"{r.name} (alpha {r.alpha}, beta {r.beta}, dirt {r.dirt})"
+                             for r in runs),
           f"| {args.envs} games each, river {args.river} | target {int(args.steps):,} steps "
           "each", flush=True)
     stop = {"now": False}

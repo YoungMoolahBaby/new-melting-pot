@@ -235,6 +235,35 @@ def test_dirt_starts_spawning_after_frame_50():
     assert int(env.town("neighbours", river="clean").dirt_spawns) == 0
 
 
+def test_capped_dirt_stops_at_40_percent_and_melting_pots_does_not():
+    # From a clean river with dirt arriving, nobody cleaning, for 800 frames (games
+    # last at least 1,099). Capped: dirt stops at 59 of 147 cells, the first count at
+    # or past 40%. Melting Pot's: it keeps coming (~0.5 a frame for 750 frames).
+    env = cu.CleanUp()
+    noop = jnp.zeros(7, jnp.int32)
+
+    def dirt_counts(town, key):
+        s = env.reset(key, town)
+
+        def frame(s, k):
+            s, *_ = env.step(k, s, noop, town)
+            return s, s.dirt.sum()
+
+        return jax.lax.scan(frame, s, jax.random.split(key, 800))[1]
+
+    run = jax.jit(jax.vmap(dirt_counts, in_axes=(None, 0)))
+    keys = jax.random.split(jax.random.PRNGKey(0), 8)
+    counts = {}
+    for dirt in ("capped", "melting_pot"):
+        town = env.town("neighbours", "clean", dirt=dirt).replace(dirt_spawns=jnp.asarray(True))
+        counts[dirt] = np.asarray(run(town, keys))
+    assert counts["capped"].max() == 59 and (counts["capped"][:, -1] == 59).all()
+    assert counts["melting_pot"][:, -1].min() > 120
+    assert float(env.town().dirt_cap) == 1.0                      # Melting Pot's by default
+    with pytest.raises(ValueError, match="dirt must be one of"):
+        env.town(dirt="gentle")
+
+
 def test_game_length_follows_melting_pot():
     keys = jax.random.split(jax.random.PRNGKey(3), 20000)
     ends = jax.vmap(cu.episode_ends, in_axes=(0, None))

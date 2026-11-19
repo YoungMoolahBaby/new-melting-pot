@@ -59,6 +59,25 @@ def test_two_runs_keep_their_own_players(tmp_path):
     assert not np.allclose(wa, wb)
 
 
+def test_shared_players_get_the_average_of_everyones_apples():
+    reward = np.array([[1.0, 0, 0, 0, 0, 0, 0.4], [0, 0, 0, 0, 0, 0, 0]], np.float32)
+    shared = np.asarray(jtrain.team_reward(reward, True))
+    assert shared.shape == reward.shape and np.allclose(shared[0], 0.2) and not shared[1].any()
+    assert np.array_equal(np.asarray(jtrain.team_reward(reward, False)), reward)
+
+
+def test_dirt_rule_and_shared_players_are_set_per_run(tmp_path):
+    jtrain.main(["--runs", "neighbours:shared", "neighbours:fair:0:capped", "--steps", "32",
+                 "--out-root", str(tmp_path), *TINY])
+    a = json.load(open(tmp_path / "neighbours_shared_s0" / "config.json"))
+    b = json.load(open(tmp_path / "neighbours_fair_s0_capped" / "config.json"))
+    assert (a["players"], a["dirt"], a["beta"]) == ("shared", "melting_pot", 0.0)
+    assert (b["players"], b["dirt"], b["beta"]) == ("fair", "capped", 0.05)
+    out = str(tmp_path / "neighbours_fair_s0_capped")
+    with pytest.raises(SystemExit, match="different settings"):
+        jtrain.main(["--players", "fair", "--out", out, "--steps", "64", "--resume", *TINY])
+
+
 def test_finished_games_are_logged_like_melting_pots(tmp_path):
     # Every game ends by frame 5,000: 4 games x 128 steps x 40 updates finishes each.
     out = str(tmp_path / "run")

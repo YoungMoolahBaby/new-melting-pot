@@ -60,6 +60,15 @@ RIVERS = ("melting_pot", "hughes", "clean")
 #                speed: a sanity check that the players can learn to find apples
 HUGHES_DIRT = 60
 
+DIRT_RULES = ("melting_pot", "capped")
+# How dirt arrives (one cell with probability 0.5 a frame, from frame 51). JAX Clean Up only.
+#   melting_pot  keeps arriving while any river cell is clean, so the river can silt up
+#                completely (Melting Pot's DirtSpawner; SocialJax the same)
+#   capped       stops while 40% or more of the river is dirty, as in the open Sequential
+#                Social Dilemma Games Cleanup (eugenevinitsky/sequential_social_dilemma_games):
+#                the river never gets worse than just past the line where apples stop
+DIRT_CAP = {"melting_pot": 1.0, "capped": 0.4}
+
 
 def map_rows(town: str = "neighbours", river: str = "melting_pot") -> list[str]:
     """ASCII_MAP as rows, with the river's starting dirt set by `river` and feed
