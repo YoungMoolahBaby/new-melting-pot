@@ -362,9 +362,24 @@ cd /mnt/c/dev/new-melting-pot && ~/venvs/meltingpot/bin/python sims/jaxtown/cola
 - Colab doesn't publish its limits (people report ~12-hour sessions and ~90 minutes idle), and a
   machine can go at any time. When it does, the runner trims the logs here back to the
   checkpoint here, starts a new machine, uploads the copies and resumes. Training saves a
-  checkpoint every 5 minutes on Colab, so a lost machine costs at most that, plus a few minutes
-  to start another.
+  checkpoint every 5 minutes on Colab, so a lost machine costs the training since the last
+  checkpoint copied here (at most about 15 minutes with the defaults), plus a few minutes to
+  start another.
 - When every run is done it copies everything back and stops the machine; it stops it on any
-  error or Ctrl-C too. Running the same command again carries on from the copies here.
+  error or Ctrl-C too. Running the same command again carries on from the copies here. At the
+  start it stops any machine left under the same `--session` name (say, after this PC
+  restarted), so use one runner per session name.
 - Tested against a pretend Colab (`tests/test_colab_runner.py`): the machine is taken away
   mid-run, a second one resumes, and both runs end with every update logged exactly once.
+
+**Drill on a real Colab TPU (2026-11-19).** Two runs of 40 updates on the free v5e, checkpoints
+every minute, copies every 90 seconds. Once the first checkpoints (update 1) were copied here,
+the machine was stopped from outside, as when Colab takes one back:
+
+- The runner saw the machine gone at its next check, started a second one within seconds,
+  uploaded the checkpoints (about 40 s for each run's 52 MB) and resumed at update 1, about 4
+  minutes after the machine went.
+- Both runs finished all 40 updates; the copies here have every update logged exactly once and
+  all 1,448 games of each run in order. The runner then stopped the machine.
+- Uploading ran at about 1.2 MB/s, so a run's checkpoint takes ~40 s to send (downloads
+  weren't timed on their own).
