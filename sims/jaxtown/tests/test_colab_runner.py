@@ -9,6 +9,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -26,15 +27,22 @@ TINY = ["--envs", "4", "--minibatches", "2", "--rollout", "128", "--ckpt-minutes
 class FakeColab:
     """Pretend Colab: one machine at a time, a folder `root`. `lose_at`: the first time the
     machine is asked anything after every run has logged this update, it is lost (its
-    training killed, its files gone), as when Colab takes a machine back."""
+    training killed, its files gone), as when Colab takes a machine back. `idle_limit`:
+    like real Colab, the machine is lost if its notebook runs nothing for that many
+    seconds (copying files doesn't count). `copy_seconds`: each upload or download takes
+    this long, as real copies do (~40 s per checkpoint)."""
 
-    def __init__(self, root, lose_at=None, broken_launch=False):
+    def __init__(self, root, lose_at=None, broken_launch=False, idle_limit=None,
+                 copy_seconds=0.0):
         self.root, self.lose_at, self.broken_launch = root, lose_at, broken_launch
+        self.copy_seconds = copy_seconds
+        self.idle_limit, self.last_run, self.pings = idle_limit, 0.0, 0
         self.accel, self.up, self.started, self.lost = [], False, 0, 0
 
     def new(self):
         self.started += 1
         self.up = True
+        self.last_run = time.time()
         os.makedirs(self.root, exist_ok=True)
         link = os.path.join(self.root, "new-melting-pot")
         if not os.path.exists(link):
@@ -73,8 +81,12 @@ class FakeColab:
     def exec(self, code, timeout=180, silence=60):
         if self.up and self.lose_at and not self.lost and self._logged_update() >= self.lose_at:
             self.lose()
+        if self.up and self.idle_limit and time.time() - self.last_run > self.idle_limit:
+            self.lose()
         if not self.up:
             return 1, "", "session not found"
+        self.last_run = time.time()
+        self.pings += "PING" in code
         if self.broken_launch and "LAUNCHED" in code:
             return 1, "", "kernel died"
         p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
@@ -84,6 +96,7 @@ class FakeColab:
     def upload(self, local, remote):
         if not self.up:
             return 1, "", "session not found"
+        time.sleep(self.copy_seconds)
         os.makedirs(os.path.dirname(remote), exist_ok=True)
         shutil.copyfile(local, remote)
         return 0, "", ""
@@ -91,6 +104,7 @@ class FakeColab:
     def download(self, remote, local):
         if not self.up or not os.path.exists(remote):
             return 1, "", "not found"
+        time.sleep(self.copy_seconds)
         shutil.copyfile(remote, local)
         return 0, "", ""
 
@@ -124,6 +138,20 @@ def test_a_lost_machine_is_replaced_and_the_runs_resume_without_gaps(tmp_path):
         assert cfg["out_root"].startswith(str(tmp_path / "machine"))   # written on the machine
     assert os.path.exists(os.path.join(local, "train_machine1.log"))
     assert os.path.exists(os.path.join(local, "train_machine2.log"))
+
+
+def test_pings_keep_a_machine_whose_notebook_would_otherwise_look_idle(tmp_path):
+    # Copies every 6 s, each file taking 1.5 s, but Colab takes a machine idle for 3 s:
+    # only the pings (every second, between copies and between files) keep it. Without
+    # them this run would lose a machine at every copy.
+    fake = FakeColab(str(tmp_path / "machine"), idle_limit=3, copy_seconds=1.5)
+    local = str(tmp_path / "here" / "runs")
+    r = cr.Runner(fake, ["--out-root", local, *TINY, "--steps", str(6 * UPD)], sync_minutes=0.1,
+                  remote_root=str(tmp_path / "machine"), commit="test", setup=False,
+                  log=lambda line: None, ping_seconds=1)
+    done = r.run()
+    assert fake.lost == 0 and fake.started == 1 and fake.pings > 5
+    assert done == {"neighbours_selfish_s0": 6 * UPD}
 
 
 def test_the_machine_is_always_stopped_and_bad_starts_give_up(tmp_path):

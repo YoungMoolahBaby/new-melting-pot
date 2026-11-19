@@ -12,6 +12,8 @@ What it does:
 - starts a Colab machine, installs the library versions we use, clones our code at this
   commit, uploads the latest copy of each run (if any), and starts train_jax.py there in
   the background with --resume;
+- in between, runs a tiny bit of Python on the machine every --ping-seconds: Colab keeps a
+  machine only while its notebook is active, and training runs in a separate process;
 - every --sync-minutes, copies each run back to --out-root here: the checkpoint first,
   then config.json, metrics.csv, the new lines of episodes.jsonl, and the machine's
   train log (so the logs are never older than the checkpoint; --resume drops the extra);
@@ -115,8 +117,8 @@ def remote_argv(train_argv, remote_out):
 
 class Runner:
     def __init__(self, cli, train_argv, sync_minutes=10.0, max_machines=20, max_crashes=3,
-                 remote_root="/content", commit=None, setup=True, log=None):
-        self.cli, self.sync_s = cli, 60 * sync_minutes
+                 remote_root="/content", commit=None, setup=True, log=None, ping_seconds=60.0):
+        self.cli, self.sync_s, self.ping_s = cli, 60 * sync_minutes, ping_seconds
         self.max_machines, self.max_crashes = max_machines, max_crashes
         self.args = train_jax.parse(train_argv)
         if self.args.out:
@@ -132,7 +134,7 @@ class Runner:
         # Machine logs are named after the session, so two runners can share --out-root.
         self.log_prefix = f"train_{cli.session}_" if getattr(cli, "session", None) else "train_"
         self.machines = self.crashes = 0
-        self.alive = False
+        self.alive, self.last_active = False, 0.0   # last time the notebook ran anything
         os.makedirs(self.local, exist_ok=True)
         self.log_f = open(os.path.join(self.local, "runner.log"), "a")
         self.echo = log or print
@@ -176,6 +178,7 @@ class Runner:
         Raises MachineLost when the machine stops answering."""
         for attempt in range(tries):
             rc, out, err = self.cli.exec(code, timeout=timeout, silence=silence)
+            self.last_active = time.time()
             for line in out.splitlines():
                 if line.startswith(marker + " "):
                     return line[len(marker) + 1:]
@@ -218,6 +221,7 @@ print("SETUP jax", jv, "flax", md.version("flax"), "optax", md.version("optax"))
                     rc, out, err = self.cli.upload(path, f"{self.r_out}/{name}/{f}")
                     if rc != 0:
                         raise MachineLost(f"upload {name}/{f}: {clean(err)}")
+                    self.keep_alive()
             self.say(f"  uploaded {name} at {steps:,} steps")
 
     def launch(self):
@@ -271,6 +275,7 @@ print("STATUS " + json.dumps(st))
         os.makedirs(os.path.dirname(local), exist_ok=True)
         tmp = local + ".part"
         rc, out, err = self.cli.download(remote, tmp)
+        self.keep_alive()
         if rc != 0 or not os.path.exists(tmp):
             self.say(f"  download failed {remote}: {clean(err, 200)}")
             return False
@@ -339,6 +344,7 @@ print("CHUNKS " + json.dumps(res))
             elif n > 0:
                 tmp = local + ".chunk"
                 rc, out, err = self.cli.download(f"{self.r_sync}/{name}.chunk", tmp)
+                self.keep_alive()
                 if rc == 0 and os.path.exists(tmp) and os.path.getsize(tmp) == n:
                     with open(tmp, "rb") as src, open(local, "ab") as dst:
                         dst.write(src.read())
@@ -375,6 +381,31 @@ print("CHUNKS " + json.dumps(res))
                      ("" if rc == 0 else f" (stop said: {clean(err or out, 200)})"))
             self.alive = False
 
+    def keep_alive(self):
+        """Run a tiny bit of Python on the machine if nothing has run there for
+        --ping-seconds. Colab keeps a machine only while its notebook is active, and
+        training runs in a separate process, so without this the notebook looks idle and
+        Colab takes the machine (measured 2026-11-19: gone within 20 quiet minutes).
+        Copying files doesn't count as activity, so long copies call this between files.
+        Returns False if the machine didn't answer."""
+        if time.time() - self.last_active < self.ping_s:
+            return True
+        rc, out, err = self.cli.exec("print('PING ok')", timeout=120, silence=60)
+        self.last_active = time.time()
+        if "PING ok" not in out:
+            self.say(f"  ping got no answer: {clean(out + err, 200)}")
+            return False
+        return True
+
+    def wait_and_ping(self, until):
+        """Wait for the next copy, keeping the machine active meanwhile. A ping that gets
+        no answer ends the wait early, so a lost machine is noticed at once."""
+        while time.time() < until:
+            time.sleep(max(0.0, min(5.0, until - time.time(),
+                                    self.last_active + self.ping_s - time.time())))
+            if time.time() < until and not self.keep_alive():
+                return
+
     def finished(self, done):
         return all(s >= self.target for s in done.values())
 
@@ -401,9 +432,7 @@ print("CHUNKS " + json.dumps(res))
                             raise SystemExit("colab_runner: two machines in a row failed to "
                                              "start training; see runner.log") from None
                         continue
-                t_next = time.time() + self.sync_s
-                while time.time() < t_next:
-                    time.sleep(min(5.0, max(0.0, t_next - time.time())))
+                self.wait_and_ping(time.time() + self.sync_s)
                 try:
                     st = self.status()
                     done = self.sync(st)
@@ -483,12 +512,15 @@ def main(argv=None):
     ap.add_argument("--tpu", default="v5e1", help="Colab TPU type (v5e1, v6e1)")
     ap.add_argument("--gpu", default=None, help="a Colab GPU type instead of a TPU")
     ap.add_argument("--sync-minutes", type=float, default=10.0)
+    ap.add_argument("--ping-seconds", type=float, default=60.0,
+                    help="how often to keep the machine's notebook active between copies")
     ap.add_argument("--max-machines", type=int, default=20)
     ap.add_argument("--max-crashes", type=int, default=3)
     opts = ap.parse_args(argv[:i])
     accel = ["--gpu", opts.gpu] if opts.gpu else ["--tpu", opts.tpu]
     runner = Runner(ColabCLI(opts.session, accel), argv[i + 1:], opts.sync_minutes,
-                    opts.max_machines, opts.max_crashes, commit=pushed_commit())
+                    opts.max_machines, opts.max_crashes, commit=pushed_commit(),
+                    ping_seconds=opts.ping_seconds)
     runner.run()
 
 
