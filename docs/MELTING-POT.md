@@ -310,3 +310,61 @@ Steps 90M-100M of each run (the 300M runs above cut at 100M), about 6,600 games 
 For experiment 1 this sharpens the question: with the same game, the same river and the same
 learner, a town that pulls together eats about 2,850 apples a game and one that doesn't eats about
 70. The towns ask how much of that gap connection closes, and how much isolation widens it.
+
+### Where the training time goes (2026-11-19)
+
+One training step on the 4070 Ti (512 games x 128 steps, 2.3 s) splits into playing the game
+(~4%), the players choosing their moves (~12%) and learning (~84%); within learning, the
+players' memory (GRU) loop takes about a quarter. Speed-ups that keep the maths exactly the same
+gave little: unrolling the memory loop -9% of the learning time, batching 4 runs in one call -13%,
+the eyes as plain matrix products none. Fewer, bigger minibatches (which would change how the
+players learn) gave only -8-10%, so they're not worth it. The work is the players' networks
+themselves. Under WSL, the GPU's default graph recording matters a lot: turning it off made
+learning 3.8x slower. (NVIDIA's profiler crashes under WSL; these are timings of the whole
+learning step with parts swapped out.)
+
+### On a Colab TPU (2026-11-19)
+
+Same code on Google Colab's free TPU (v5e, one chip, JAX 0.11.2), checked with
+`sims/jaxtown/tpu_check.py`:
+
+| | Colab TPU v5e | RTX 4070 Ti |
+|---|---|---|
+| 256 random games x 1,500 frames | identical, every frame | |
+| Clean-river practice run, apples per step at 1M / 2M / 3M steps | 1.57 / 2.14 / 2.35 | 1.58 / 2.11 / 2.32 |
+| Training, 1 run | 22,100 steps/s | 28,600 steps/s |
+| Training, 3 runs sharing the chip | 22,200 steps/s in all | 27,300 steps/s in all |
+| Random play, 4,096 games | 165,000 steps/s | 2,130,000 steps/s |
+
+- **Same game, bit for bit.** The game uses only integer maths and JAX's random numbers, which
+  are the same on every machine.
+- **Same learning, within about 2%.** Not bit for bit: the chips round floating-point numbers
+  differently, and small differences grow during training. The curves match.
+- **One TPU chip trains at about 80% of the 4070 Ti.** The game itself runs 13x slower on the
+  TPU (its many small steps suit a GPU better), but it's only a few percent of training. Several
+  chips, each running its own runs, is where TPUs would add speed.
+
+### Training on Colab: `colab_runner.py`
+
+`sims/jaxtown/colab_runner.py` runs `train_jax.py` on a Colab machine from this PC and keeps it
+going. It needs the `colab` command (`uv tool install --with keyrings.alt google-colab-cli` in
+WSL, then `colab whoami` once to sign in in the browser) and the current commit pushed to
+GitHub, since the machine clones the public repo at that commit.
+
+```
+cd /mnt/c/dev/new-melting-pot && ~/venvs/meltingpot/bin/python sims/jaxtown/colab_runner.py \
+    --session towns -- --runs neighbours:selfish neighbours:fair --river hughes \
+    --steps 1e8 --out-root out/colab/towns
+```
+
+- Every `--sync-minutes` (10) it copies each run back to `--out-root` here: the checkpoint first,
+  then the logs, and only the new lines of the long game log.
+- Colab doesn't publish its limits (people report ~12-hour sessions and ~90 minutes idle), and a
+  machine can go at any time. When it does, the runner trims the logs here back to the
+  checkpoint here, starts a new machine, uploads the copies and resumes. Training saves a
+  checkpoint every 5 minutes on Colab, so a lost machine costs at most that, plus a few minutes
+  to start another.
+- When every run is done it copies everything back and stops the machine; it stops it on any
+  error or Ctrl-C too. Running the same command again carries on from the copies here.
+- Tested against a pretend Colab (`tests/test_colab_runner.py`): the machine is taken away
+  mid-run, a second one resumes, and both runs end with every update logged exactly once.

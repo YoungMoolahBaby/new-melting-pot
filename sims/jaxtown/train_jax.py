@@ -162,6 +162,19 @@ def make_train_step(env, learner, num_envs, rollout, ia_gamma, ia_lambda):
     return jax.jit(train_step, donate_argnums=(0,))
 
 
+def run_identity(run_spec, args):
+    """A run's folder name and the settings that make it that run (also used by
+    colab_runner.py, which checks folders on this PC before a cloud machine resumes them)."""
+    town, players, seed, dirt = run_spec
+    alpha, beta = PLAYERS[players]
+    settings = {"town": town, "players": players, "seed": seed, "dirt": dirt,
+                "alpha": alpha if args.alpha is None else args.alpha,
+                "beta": beta if args.beta is None else args.beta}
+    # (Melting Pot's dirt rule adds nothing to the name, so older runs still resume.)
+    name = f"{town}_{players}_s{seed}" + ("" if dirt == "melting_pot" else f"_{dirt}")
+    return name, settings
+
+
 class Run:
     """One town with its own 7 learning players, all its games on the GPU."""
 
@@ -170,18 +183,11 @@ class Run:
         import jax.numpy as jnp
         self.jax, self.jnp = jax, jnp
         self.town, self.players, self.seed, self.dirt = run_spec
-        alpha, beta = PLAYERS[self.players]
-        self.alpha = alpha if args.alpha is None else args.alpha
-        self.beta = beta if args.beta is None else args.beta
-        # (Melting Pot's dirt rule adds nothing to the name, so older runs still resume.)
-        self.name = f"{self.town}_{self.players}_s{self.seed}" + (
-            "" if self.dirt == "melting_pot" else f"_{self.dirt}")
+        self.name, settings = run_identity(run_spec, args)
+        self.alpha, self.beta = settings["alpha"], settings["beta"]
         self.out = args.out or os.path.join(args.out_root, self.name)
         self.args, self.env, self.learner, self.train_step = args, env, learner, train_step
-        town_train.check_folder(self.out, args, {"town": self.town, "players": self.players,
-                                                 "seed": self.seed, "alpha": self.alpha,
-                                                 "beta": self.beta, "dirt": self.dirt},
-                                SAME_ON_RESUME)
+        town_train.check_folder(self.out, args, settings, SAME_ON_RESUME)
         self.tw = env.town(self.town, args.river, args.feed_reward, args.feed_period,
                            args.badge_frames, self.dirt)
         self.reward_args = (jnp.float32(self.alpha), jnp.float32(self.beta),
