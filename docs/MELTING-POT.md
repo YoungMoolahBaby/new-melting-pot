@@ -243,7 +243,7 @@ Last 10% of each run; random players from `compare.md`. Games last about 1,500 s
   more reward. It matches SocialJax only in part: there selfish players barely clean, and here
   the fair ones don't do better.
 
-### Why the players stop learning (2026-11-18)
+### Why the players stop learning (2026-11-18 to 11-19)
 
 They eat almost only at the very start of each game: the average apple is eaten around frame
 50-55, and in 9 games out of 10 before frame 70. The river starts 41% dirty, just over the 40%
@@ -252,7 +252,8 @@ the river under the line and apples grow for a moment. Then dirt arrives at 0.5 
 than the players clean (about 0.32), and for the remaining ~1,400 frames the river stays silted
 up. With no reward anywhere later in the game, nothing teaches them to keep it clean.
 
-The rule behind it is how dirt arrives, and the three versions of Cleanup differ:
+**Our first guess was the dirt rule. The test below says it isn't.** The three versions of
+Cleanup differ in how dirt arrives:
 
 - **Melting Pot:** its `DirtSpawner` (`lua/levels/clean_up/components.lua`) adds one dirt with
   probability 0.5 every frame as long as any river cell is clean, so the river can fill up
@@ -261,12 +262,51 @@ The rule behind it is how dirt arrives, and the three versions of Cleanup differ
 - **The open Sequential Social Dilemma Games Cleanup**
   ([eugenevinitsky/sequential_social_dilemma_games](https://github.com/eugenevinitsky/sequential_social_dilemma_games),
   `cleanup.py`, same 0.4 / 0.5 / 0.05 numbers) stops adding dirt once the river is 40% dirty.
-  The river can't get worse than just past the line, so a little cleaning always brings apples
-  back.
+  The river can't get worse than just past the line, so a little cleaning always brings a few
+  apples back.
 
-Hughes et al.'s own code isn't public; the open version is widely used in later work. Their
-result most likely comes from the gentler game.
+Hughes et al.'s own code isn't public; the open version is widely used in later work. So we
+guessed their result came from the gentler game, and tested that.
 
-Next, not run yet: add "dirt stops at 40%" as an option and train selfish against fair players
-on it; and one run on Melting Pot's rule in which all seven share their apples, to see whether
-recovering a silted river can be learned at all.
+**The test** (100M steps, one seed each, `hughes` river start, three runs sharing the GPU, about
+9,100 steps/s each, 3 hours):
+
+- selfish and fair players, with dirt stopping at 40% (`--dirt capped`, the open version's rule);
+- players who share their apples, on Melting Pot's own rule: each is paid the average of all
+  seven players' apples (`shared`). Can a silted river be won back at all?
+
+![The first 100M steps: players sharing apples, and selfish and fair players under each dirt rule](img/dirt-rule-100m.png)
+
+| Players | Dirt rule | Dirt cleaned / step | Apples / step | Reward / game (all 7) | Cleaned / game | Zaps / game |
+|---|---|---|---|---|---|---|
+| sharing apples | Melting Pot's | 0.507 | 1.890 | 2,850 | 764 | 2.6 |
+| selfish | stops at 40% | 0.028 | 0.049 | 73 | 42 | 34.7 |
+| fair | stops at 40% | 0.023 | 0.014 | 22 | 35 | 37.1 |
+| selfish (seed 0 above) | Melting Pot's | 0.318 | 0.051 | 76 | 479 | 26.3 |
+| fair (seed 0 above) | Melting Pot's | 0.277 | 0.031 | 46 | 416 | 27.3 |
+
+Steps 90M-100M of each run (the 300M runs above cut at 100M), about 6,600 games each.
+
+- **Players who share keep the river clean, on Melting Pot's own rule.** They clean 0.51 dirt a
+  step, just ahead of the 0.5 that arrives, and eat 1.9 apples a step, about four-fifths of the
+  2.3 a river that never gets dirty gives. That's about 37 times what selfish players get.
+- **They split the work.** The same three players (1, 2 and 6) clean in every game, 240-270 dirt
+  each, and eat almost nothing; the other four eat 680-740 apples each and barely clean. They
+  hardly zap each other (2.6 zaps a game, against 26-37). They learned it fast: 0.26 apples a
+  step by 5M steps, 1.2 by 25M.
+- **Stopping the dirt at 40% didn't help.** Selfish players ate about as much as under Melting
+  Pot's rule, and fair players less, though fair players were slow to learn under either rule (as
+  in the 300M runs above). With the river held at the line, where apples barely grow, and dirt
+  coming straight back after each clean, a little cleaning still brings almost no apples; they
+  cleaned about a tenth as much.
+- **So the river isn't the problem. Who pays for cleaning is.** Cleaning costs the cleaner time
+  they could spend eating, and feeds everyone, so each selfish player does better eating while others clean, and then
+  nobody cleans. That's the social dilemma Clean Up was built to pose, and the players are
+  stuck in it, not stopped by a broken game. Hughes et al.'s guilt (beta 0.05) didn't get our
+  players out of it, at 100M or at 300M steps.
+- **One seed each**, so a first look. The gap between sharing players and the rest (2,850 against
+  at most 76) is far bigger than anything seeds changed in the runs above (64-76 at 300M).
+
+For experiment 1 this sharpens the question: with the same game, the same river and the same
+learner, a town that pulls together eats about 2,850 apples a game and one that doesn't eats about
+70. The towns ask how much of that gap connection closes, and how much isolation widens it.

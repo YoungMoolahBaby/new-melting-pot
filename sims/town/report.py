@@ -49,11 +49,16 @@ def rolling(x, n):
     return np.concatenate([np.full(n - 1, np.nan), out])
 
 
-def label_for(config):
-    who = {"selfish": "selfish players", "fair": "fair-minded players"}.get(
-        config["players"], config["players"])
-    game = " (JAX)" if config.get("game") == "jaxtown" else ""
+def label_for(config, show_game=True):
+    who = {"selfish": "selfish players", "fair": "fair-minded players",
+           "shared": "players sharing apples"}.get(config["players"], config["players"])
+    game = " (JAX)" if show_game and config.get("game") == "jaxtown" else ""
     return f"{config['town']}, {who}{game}"
+
+
+# How a setting reads in a label, where plain "name value" would be unclear.
+SETTING_TEXT = {("dirt", "melting_pot"): "Melting Pot's dirt",
+                ("dirt", "capped"): "dirt stops at 40%"}
 
 
 def summary(metrics, episodes, frac=0.1):
@@ -87,7 +92,9 @@ def run_series(metrics, episodes):
            (x, rolling(metrics["apples_per_step"], window))]
     if episodes:
         ex = np.array([e["env_steps"] for e in episodes]) / 1e6
-        out.append((ex, rolling([e["collective_return"] for e in episodes], 48)))
+        # (Long GPU runs finish tens of thousands of games: smooth over more of them.)
+        out.append((ex, rolling([e["collective_return"] for e in episodes],
+                                max(48, len(episodes) // 100))))
     else:
         out.append((np.array([]), np.array([])))
     return out
@@ -136,7 +143,8 @@ def chart(groups, out, title):
                 ax.fill_between(sx, ylo, yhi, color=colour, alpha=0.15, linewidth=0)
             ax.plot(sx, sy, color=colour, linewidth=1.5, label=lab, solid_capstyle="round")
             ok = np.isfinite(sy)
-            if ok.any():  # direct label at the line's end, in text ink
+            # Direct label at the line's end, in text ink; past 4 lines, the legend alone.
+            if ok.any() and len(groups) <= 4:
                 ax.annotate(short, (sx[ok][-1], sy[ok][-1]), xytext=(4, 0),
                             textcoords="offset points", va="center", fontsize=9, color=INK2)
     for ax in axes:
@@ -144,9 +152,11 @@ def chart(groups, out, title):
         ax.margins(x=0.1)
     handles, labels = axes[0].get_legend_handles_labels()
     fig.suptitle(title, x=0.01, y=0.99, ha="left", fontsize=12, color=INK)
+    ncol = min(len(groups), 4 if max(len(lab) for lab, _, _ in groups) <= 40 else 2)
+    rows = -(-len(groups) // ncol)
     fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.01, 0.94), frameon=False,
-               ncol=min(len(groups), 4), fontsize=9, labelcolor=INK2)
-    fig.tight_layout(rect=(0, 0, 1, 0.89))
+               ncol=ncol, fontsize=9, labelcolor=INK2)
+    fig.tight_layout(rect=(0, 0, 1, 0.89 - 0.045 * max(0, rows - 2)))
     fig.savefig(out, facecolor=SURFACE)
     plt.close(fig)
 
@@ -159,17 +169,38 @@ def main(argv=None):
     ap.add_argument("--group", action="store_true",
                     help="draw runs of the same town, players and game (seeds) as one mean "
                          "line with a band from the lowest to the highest run")
+    ap.add_argument("--until", type=float, default=None,
+                    help="use each run only up to this many steps (to line up longer runs)")
     args = ap.parse_args(argv)
     runs = [load(r) for r in args.runs]
+    if args.until:
+        runs = [({k: v[m["env_steps"] <= args.until] for k, v in m.items()},
+                 [e for e in eps if e["env_steps"] <= args.until], cfg) for m, eps, cfg in runs]
     # Settings that make two runs different experiments (seeds aside). Any that differ
     # between the runs given here are added to the labels.
-    setting = {"river": "melting_pot", "alpha": None, "beta": None, "feed_reward": None,
-               "feed_period": None, "badge_frames": None}
+    setting = {"river": "melting_pot", "dirt": "melting_pot", "alpha": None, "beta": None,
+               "feed_reward": None, "feed_period": None, "badge_frames": None}
     get = lambda cfg, k: cfg.get(k, setting[k])  # noqa: E731
-    varying = [k for k in setting if len({str(get(cfg, k)) for _, _, cfg in runs}) > 1]
+
+    def differs(k):
+        values = {str(get(cfg, k)) for _, _, cfg in runs}
+        if k in ("alpha", "beta"):   # usually set by the players' type, already named
+            by_type = {}
+            for _, _, cfg in runs:
+                by_type.setdefault(cfg["players"], set()).add(str(get(cfg, k)))
+            return any(len(v) > 1 for v in by_type.values())
+        return len(values) > 1
+
+    varying = [k for k in setting if differs(k)]
+    show_game = len({cfg.get("game") for _, _, cfg in runs}) > 1
+
+    def setting_text(cfg, k):
+        v = get(cfg, k)
+        return SETTING_TEXT.get((k, v), f"{k.replace('_', ' ')} {v}")
+
     def run_label(cfg):
-        return label_for(cfg) + "".join(f", {k.replace('_', ' ')} {get(cfg, k)}"
-                                        for k in varying)
+        return label_for(cfg, show_game) + "".join(f", {setting_text(cfg, k)}"
+                                                   for k in varying)
 
     groups = {}
     for i, run in enumerate(runs):
@@ -180,7 +211,7 @@ def main(argv=None):
                    *(str(get(cfg, k)) for k in setting))
         else:
             key, lab = i, f"{lab}, seed {cfg.get('seed', 0)}"
-        short = cfg["players"] + (" JAX" if cfg.get("game") == "jaxtown" else "")
+        short = cfg["players"] + (" JAX" if show_game and cfg.get("game") == "jaxtown" else "")
         groups.setdefault(key, (lab, short, []))[2].append(run)
     groups = [(lab + (f" ({len(rs)} seeds)" if len(rs) > 1 else ""), short, rs)
               for lab, short, rs in groups.values()]
