@@ -225,6 +225,11 @@ class Run:
                    "key": key}
         metrics_path = os.path.join(self.out, "metrics.csv")
         new_file = not os.path.exists(metrics_path)
+        # This run's chip (see main): its state, town and reward settings live there, so
+        # its compiled step runs there, at the same time as the other chips' runs.
+        if getattr(self, "device", None) is not None:
+            self.rs, self.tw, self.reward_args = jax.device_put(
+                (self.rs, self.tw, self.reward_args), self.device)
         self.metrics_f = open(metrics_path, "a", newline="")
         self.metrics = csv.DictWriter(self.metrics_f, fieldnames=METRIC_FIELDS)
         if new_file:
@@ -292,15 +297,21 @@ def build(args):
 
 
 def main(argv=None):
+    import jax
     args = parse(argv)
     env, learner, train_step = build(args)
     runs = [Run(s, args, env, learner, train_step) for s in args.specs]
-    for r in runs:
+    # Runs take turns over this machine's chips (one GPU here: all on it, as before; a
+    # Cloud TPU machine has 4 or 8). Each run's maths is the same on any chip of a kind.
+    devices = jax.local_devices()
+    for i, r in enumerate(runs):
+        r.device = devices[i % len(devices)] if len(devices) > 1 else None
         r.setup()
     print("runs:", ", ".join(f"{r.name} (alpha {r.alpha}, beta {r.beta}, dirt {r.dirt})"
                              for r in runs),
           f"| {args.envs} games each, river {args.river} | target {int(args.steps):,} steps "
-          "each", flush=True)
+          f"each | {min(len(devices), len(runs))} of {len(devices)} {devices[0].platform} "
+          "chips", flush=True)
     stop = {"now": False}
 
     def on_signal(signum, frame):

@@ -383,3 +383,55 @@ the machine was stopped from outside, as when Colab takes one back:
   all 1,448 games of each run in order. The runner then stopped the machine.
 - Uploading ran at about 1.2 MB/s, so a run's checkpoint takes ~40 s to send (downloads
   weren't timed on their own).
+
+**Free Colab ran out (2026-11-19).** The four towns' seed 1 (8 runs) trained on the free v5e for
+1 h 36 min, to 13.5M steps a run. Then Colab took the machine and answered every request for
+another TPU with "Service Unavailable" for over five hours, most likely the free plan's usage
+limit (Colab doesn't publish it). The runs carried on on the 4070 Ti from the copies here. Free
+Colab suits tests and short runs; long runs need a TPU grant or paid compute.
+
+### Training on Cloud TPUs: `cloud_runner.py` (built 2026-11-19, not yet run on Google Cloud)
+
+`sims/jaxtown/cloud_runner.py` is the runner for Cloud TPU machines, such as those of a
+[TPU Research Cloud](https://sites.research.google/trc/about/) grant. It needs `gcloud` (signed
+in, a project set), a Cloud Storage bucket in the machines' region, and the current commit
+pushed to GitHub.
+
+```
+cd /mnt/c/dev/new-melting-pot && ~/venvs/meltingpot/bin/python sims/jaxtown/cloud_runner.py \
+    --name towns --zone us-central2-b --type v4-8 --spot --machines 2 \
+    --bucket gs://<bucket> -- --runs <8 runs> --river hughes --steps 1e8 \
+    --out-root out/cloud/towns
+```
+
+- **Only what was granted.** Cloud TPUs are free only within a grant's quota, and anything else
+  is billed. So the zone, the type and the kind (`--spot` or `--on-demand`) have no defaults: they
+  must be copied from the grant's email. The runner also stops if the bucket isn't in the
+  machines' region, since copies between regions are charged.
+- **Many chips.** The runs are dealt out over `--machines` machines. On each one, `train_jax.py`
+  spreads its runs over the machine's chips (4 on a v4-8, 8 on a v5e or v6e). Each run's maths
+  is unchanged. On one GPU nothing changes, and a test checks that two chips train bit for bit
+  as one does.
+- **The bucket holds the copies.** Every 5 minutes each machine puts its runs in the bucket
+  (`sims/jaxtown/cloud_vm.py`): logs first, then the checkpoint, so the bucket's logs are never
+  older than its checkpoint. When a spot machine is taken back, the runner deletes it, starts
+  another and carries on from the bucket. That costs the training since the last copy (up to
+  ~10 minutes) plus the new machine's set-up.
+- **Copies home.** Every `--sync-minutes` (10) it copies the small files to `--out-root` here
+  (settings, metrics, the new lines of the game log, each machine's train log in
+  `_machines/`). Checkpoints come home only when a machine's runs finish, because every copy out
+  of Google Cloud is charged. `--bring-home` copies everything, checkpoints too, without starting
+  any machine, so a run can carry on on the GPU here when a grant ends. A run that's further along
+  here than in the bucket goes up at the start, so GPU runs can carry on in the cloud.
+- **Always cleaned up.** A machine is deleted as soon as its runs finish. On an error or Ctrl-C,
+  each machine is first asked to save and put its copies in the bucket, then everything is
+  copied home and the machines are deleted.
+- **Tested against a pretend Google Cloud** (`tests/test_cloud_runner.py`, on the CPU):
+  - three runs on two machines, one machine taken back mid-run and replaced: every update logged
+    once, and the copies here are the same as the bucket's;
+  - a run started on this PC carried on in the cloud;
+  - training that keeps failing gives up and deletes its machine;
+  - Ctrl-C saves on the machine, copies home and deletes it.
+
+  The real `gcloud` commands are written from Google's documentation but haven't run yet: that
+  needs a Google Cloud project. The first real test will be a short drill, as on Colab.
