@@ -29,7 +29,9 @@ class FakeColab:
     machine is asked anything after every run has logged this update, it is lost (its
     training killed, its files gone), as when Colab takes a machine back. `idle_limit`:
     like real Colab, the machine is lost if its notebook runs nothing for that many
-    seconds (copying files doesn't count). `copy_seconds`: each upload or download takes
+    seconds after its last command ended (copying files doesn't count; a command still
+    running does, so a slow PC isn't mistaken for an idle one). `copy_seconds`: each
+    upload or download takes
     this long, as real copies do (~40 s per checkpoint)."""
 
     def __init__(self, root, lose_at=None, broken_launch=False, idle_limit=None,
@@ -91,6 +93,7 @@ class FakeColab:
             return 1, "", "kernel died"
         p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                            timeout=timeout)
+        self.last_run = time.time()     # a running command counts as activity, to its end
         return p.returncode, p.stdout, p.stderr
 
     def upload(self, local, remote):
