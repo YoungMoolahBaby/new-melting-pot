@@ -1,0 +1,247 @@
+"""Newcomers (experiment 1): 3 of a town's 7 trained players move to another town and live
+there with its 4 locals, and everyone carries on learning. Do the newcomers come to act
+like the locals, or the locals like them?
+
+The moves: every town to every other town, both ways, for selfish and for fair players
+and both seeds: 4 x 3 x 2 x 2 = 48. Players stay who they are: selfish players move to the
+selfish version of the other town and fair ones to the fair version, so their fairness
+setting comes with them. Plus a control per town (4 x 2 x 2 = 16): 3 players from the same
+town's other seed, so a new town can be told apart from just new faces. 64 runs.
+
+Newcomers always come from the other seed's run. Runs with the same seed start from the
+same weights (train_jax seeds the players' first weights with --seed), so same-seed players
+are siblings of the hosts while the controls' are not: the first try (2026-11-20, kept as
+"siblings" folders) mixed the two, and a sibling town's newcomers fitted in where every
+other newcomer broke the town's apple supply.
+
+How a move is made: the run starts from the host run's checkpoint (its 7 players' weights
+and optimizer state, and its random key, so every move into one host plays out with the
+same luck), and the newcomers' weights and optimizer state replace slots 0-2. Slots 3-6
+are the locals. Its counters start at 0: steps since the move.
+
+    cd /mnt/c/dev/new-melting-pot
+    # 1. make the 64 run folders from the finished four towns (both seeds)
+    ~/venvs/meltingpot/bin/python sims/jaxtown/newcomers.py make \\
+        --sources out/jaxtown/towns out/colab/towns --out-root out/jaxtown/newcomers
+    # 2. train them 8 at a time (train_jax.py --folders ... --resume); safe to re-run
+    ~/venvs/meltingpot/bin/python sims/jaxtown/newcomers.py train --out-root out/jaxtown/newcomers
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import pickle
+import subprocess
+import sys
+import time
+from typing import NamedTuple
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "town"))
+
+import numpy as np  # noqa: E402
+
+import cloud_vm  # noqa: E402  (ckpt_steps: a checkpoint's step count without JAX)
+import spec  # noqa: E402
+
+TRAIN = os.path.join(HERE, "train_jax.py")
+NEWCOMER_SLOTS = (0, 1, 2)
+SEEDS = (0, 1)
+PLAYER_TYPES = ("selfish", "fair")
+STEPS = 2e7
+# Settings the training after a move keeps from before it (train_jax flags of the same
+# name, with - for _). Host and newcomers must agree on them, and on the dirt rule.
+KEEP = ("river", "feed_reward", "feed_period", "badge_frames", "lr", "ent_coef", "ia_gamma",
+        "ia_lambda", "rollout", "envs", "minibatches", "dtype")
+
+
+class Move(NamedTuple):
+    host: str          # the town the newcomers move to (its run gives the 4 locals)
+    origin: str        # the town they come from
+    players: str       # selfish or fair, the same on both sides
+    seed: int          # the host run's seed
+    origin_seed: int   # the newcomers' run's seed (in plan(): always the other seed)
+
+    @property
+    def control(self):
+        return self.host == self.origin
+
+    @property
+    def name(self):
+        return (f"{self.host}_{self.players}_s{self.seed}"
+                f"_from_{self.origin}_s{self.origin_seed}")
+
+    @property
+    def host_run(self):
+        return f"{self.host}_{self.players}_s{self.seed}"
+
+    @property
+    def origin_run(self):
+        return f"{self.origin}_{self.players}_s{self.origin_seed}"
+
+
+def plan(seeds=SEEDS, player_types=PLAYER_TYPES, towns=spec.TOWNS):
+    """Every move between two towns (both ways), and a control per town, for each player
+    type and seed, the newcomers always from the other seed (see above). Ordered by player
+    type, seed, host, origin."""
+    if len(seeds) != 2:
+        raise ValueError("newcomers come from the other of exactly two seeds")
+    moves = []
+    for p in player_types:
+        for s in seeds:
+            other = seeds[1 - seeds.index(s)]
+            for host in towns:
+                for origin in towns:
+                    moves.append(Move(host, origin, p, s, other))
+    return moves
+
+
+def find_run(sources, name):
+    hits = [os.path.join(r, name) for r in sources
+            if os.path.exists(os.path.join(r, name, "ckpt.pkl"))]
+    if len(hits) != 1:
+        raise SystemExit(f"{name}: a finished run must be in exactly one of --sources "
+                         f"{list(sources)}, found {len(hits)}")
+    return hits[0]
+
+
+def load(run_dir):
+    with open(os.path.join(run_dir, "ckpt.pkl"), "rb") as f:
+        state = pickle.load(f)
+    with open(os.path.join(run_dir, "config.json")) as f:
+        config = json.load(f)
+    return state, config
+
+
+def swap_in(host_tree, newcomer_tree, slots=NEWCOMER_SLOTS):
+    """The host's weights (or optimizer state) with `slots` taken from the newcomers' run.
+    Every leaf has the player axis first (ppo.Learner vmaps over players)."""
+    import jax
+    idx = list(slots)
+
+    def put(h, o):
+        h, o = np.asarray(h), np.asarray(o)
+        if h.shape != o.shape or h.dtype != o.dtype or h.ndim == 0 or h.shape[0] != 7:
+            raise ValueError(f"can't swap players between leaves {h.shape} {h.dtype} and "
+                             f"{o.shape} {o.dtype}")
+        x = h.copy()
+        x[idx] = o[idx]
+        return x
+    return jax.tree_util.tree_map(put, host_tree, newcomer_tree)
+
+
+def make_folder(move, sources, out_root, steps=STEPS):
+    """Write `out_root/<move.name>/` (ckpt.pkl + config.json) for train_jax --folders.
+    Returns (folder, made); a folder that already exists is never touched."""
+    out = os.path.join(out_root, move.name)
+    if os.path.exists(out):
+        return out, False
+    host_dir, origin_dir = find_run(sources, move.host_run), find_run(sources, move.origin_run)
+    (host, cfg_h), (origin, cfg_o) = load(host_dir), load(origin_dir)
+    for k in ("players", "alpha", "beta", "env_steps"):
+        if host[k] != origin[k]:
+            raise SystemExit(f"{move.name}: host and newcomers differ in {k} "
+                             f"({host[k]} vs {origin[k]})")
+    diff = {k: (cfg_h.get(k), cfg_o.get(k)) for k in KEEP + ("dirt",)
+            if cfg_h.get(k) != cfg_o.get(k)}
+    if diff:
+        raise SystemExit(f"{move.name}: host and newcomers trained differently: {diff}")
+    state = {"params": swap_in(host["params"], origin["params"]),
+             "opt": swap_in(host["opt"], origin["opt"]), "key": host["key"],
+             "env_steps": 0, "update": 0, "town": host["town"], "players": host["players"],
+             "alpha": host["alpha"], "beta": host["beta"]}
+    config = {**cfg_h, "steps": steps, "out": None, "out_root": out_root, "resume": True,
+              "newcomers": {"host_run": host_dir, "newcomers_run": origin_dir,
+                            "host": move.host, "origin": move.origin, "seed": move.seed,
+                            "origin_seed": move.origin_seed, "control": move.control,
+                            "newcomer_slots": list(NEWCOMER_SLOTS),
+                            "steps_before": host["env_steps"],
+                            "updates_before": host["update"]}}
+    part = out + ".part"
+    if os.path.exists(part):
+        raise SystemExit(f"{part} is left from an earlier try: look at it, remove it, re-run")
+    os.makedirs(part)
+    with open(os.path.join(part, "ckpt.pkl"), "wb") as f:
+        pickle.dump(state, f)
+    with open(os.path.join(part, "config.json"), "w") as f:
+        json.dump(config, f, indent=2)
+    os.replace(part, out)        # the folder appears whole or not at all
+    return out, True
+
+
+def make(sources, out_root, moves=None, steps=STEPS, log=print):
+    os.makedirs(out_root, exist_ok=True)
+    made = 0
+    for m in moves or plan():
+        _, new = make_folder(m, sources, out_root, steps)
+        made += new
+    log(f"made {made} run folders in {out_root} ({len(moves or plan()) - made} were there)")
+
+
+def train(out_root, steps=STEPS, batch=8, moves=None, ckpt_minutes=10.0, python=None,
+          dry_run=False):
+    """Train every move's folder, `batch` runs per train_jax process, one process after
+    another. Finished batches are skipped, so it carries on after a stop."""
+    folders = [os.path.join(out_root, m.name) for m in moves or plan()]
+    missing = [f for f in folders if not os.path.exists(os.path.join(f, "ckpt.pkl"))]
+    if missing:
+        raise SystemExit(f"{len(missing)} run folders missing (run make first), "
+                         f"e.g. {missing[0]}")
+    queue = os.path.join(out_root, "queue.log")
+
+    def note(text):
+        with open(queue, "a") as f:
+            f.write(f"{time.strftime('%F %T')} {text}\n")
+    batches = [folders[i:i + batch] for i in range(0, len(folders), batch)]
+    for i, b in enumerate(batches):
+        if all(cloud_vm.ckpt_steps(os.path.join(f, "ckpt.pkl"))[0] >= steps for f in b):
+            continue
+        cfgs = [json.load(open(os.path.join(f, "config.json"))) for f in b]
+        flags = []
+        for k in KEEP:
+            values = {json.dumps(c[k]) for c in cfgs}
+            if len(values) != 1:
+                raise SystemExit(f"batch {i}: its runs differ in {k}: {sorted(values)}")
+            flags += [f"--{k.replace('_', '-')}", str(cfgs[0][k])]
+        argv = [python or sys.executable, TRAIN, "--folders", *b, "--resume",
+                "--steps", str(int(steps)), "--ckpt-minutes", str(ckpt_minutes), *flags]
+        if dry_run:
+            print(" ".join(argv))
+            continue
+        note(f"newcomers batch {i + 1} of {len(batches)}: starting {len(b)} runs")
+        with open(os.path.join(out_root, f"train_batch{i}.log"), "a") as log:
+            code = subprocess.call(argv, stdout=log, stderr=subprocess.STDOUT,
+                                   stdin=subprocess.DEVNULL)
+        note(f"newcomers batch {i + 1} of {len(batches)}: exited with code {code}")
+        if code:
+            note("stopping here: re-run train to carry on")
+            raise SystemExit(code)
+    if not dry_run:
+        note("newcomers: every batch finished")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    m = sub.add_parser("make", help="make the run folders from finished runs")
+    m.add_argument("--sources", nargs="+", required=True,
+                   help="folders of finished runs (<town>_<players>_s<seed>)")
+    t = sub.add_parser("train", help="train every run folder, a batch at a time")
+    t.add_argument("--batch", type=int, default=8, help="runs per process (they share the GPU)")
+    t.add_argument("--ckpt-minutes", type=float, default=10.0)
+    t.add_argument("--dry-run", action="store_true", help="print the commands only")
+    for p in (m, t):
+        p.add_argument("--out-root", default=os.path.join("out", "jaxtown", "newcomers"))
+        p.add_argument("--steps", type=float, default=STEPS, help="steps after the move")
+    args = ap.parse_args(argv)
+    if args.cmd == "make":
+        make(args.sources, args.out_root, steps=args.steps)
+    else:
+        train(args.out_root, args.steps, args.batch, ckpt_minutes=args.ckpt_minutes,
+              dry_run=args.dry_run)
+
+
+if __name__ == "__main__":
+    main()

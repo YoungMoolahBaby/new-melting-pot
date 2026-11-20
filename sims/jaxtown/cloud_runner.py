@@ -176,8 +176,9 @@ class Runner:
             raise SystemExit("cloud_runner: --name: lowercase letters, digits and -, "
                              "starting with a letter")
         self.args = train_jax.parse(train_argv)
-        if self.args.out:
-            raise SystemExit("cloud_runner: use --out-root (a folder of runs), not --out")
+        if self.args.out or self.args.folders:
+            raise SystemExit("cloud_runner: use --runs and --out-root (a folder of runs), "
+                             "not --out or --folders")
         self.local = self.args.out_root
         self.root = os.path.basename(os.path.normpath(self.local))
         self.runs = dict(train_jax.run_identity(s, self.args) for s in self.args.specs)

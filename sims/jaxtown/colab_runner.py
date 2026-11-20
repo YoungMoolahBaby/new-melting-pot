@@ -121,8 +121,9 @@ class Runner:
         self.cli, self.sync_s, self.ping_s = cli, 60 * sync_minutes, ping_seconds
         self.max_machines, self.max_crashes = max_machines, max_crashes
         self.args = train_jax.parse(train_argv)
-        if self.args.out:
-            raise SystemExit("colab_runner: use --out-root (a folder of runs), not --out")
+        if self.args.out or self.args.folders:
+            raise SystemExit("colab_runner: use --runs and --out-root (a folder of runs), "
+                             "not --out or --folders")
         self.local = self.args.out_root
         self.runs = dict(train_jax.run_identity(s, self.args) for s in self.args.specs)
         self.target = int(self.args.steps)

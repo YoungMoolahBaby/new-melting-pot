@@ -87,6 +87,10 @@ def parse(argv=None):
     ap.add_argument("--out-root", default=os.path.join("out", "jaxtown"))
     ap.add_argument("--out", default=None, help="exact output folder (one run only)")
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--folders", nargs="+", default=None,
+                    help="carry on the runs in exactly these folders, named after them (each "
+                         "holds config.json + ckpt.pkl, e.g. made by newcomers.py); with "
+                         "--resume, instead of --runs")
     args = ap.parse_args(argv)
     args.specs = []
     for s in args.runs or [f"{args.town}:{args.players}:{args.seed}:{args.dirt}"]:
@@ -97,6 +101,22 @@ def parse(argv=None):
                      f"players in {sorted(PLAYERS)}, dirt in {spec.DIRT_RULES}")
         args.specs.append((parts[0], parts[1], int(parts[2]) if len(parts) > 2 else args.seed,
                            parts[3] if len(parts) > 3 else args.dirt))
+    if args.folders:
+        if args.runs or args.out:
+            ap.error("--folders names its runs itself: drop --runs and --out")
+        if not args.resume:
+            ap.error("--folders carries on runs that already exist: add --resume")
+        args.specs = []
+        for d in args.folders:
+            d = os.path.normpath(d)
+            if not os.path.exists(os.path.join(d, "ckpt.pkl")):
+                ap.error(f"{d}: no ckpt.pkl to carry on from")
+            with open(os.path.join(d, "config.json")) as f:
+                cfg = json.load(f)
+            args.specs.append((cfg["town"], cfg["players"], cfg["seed"],
+                               cfg.get("dirt", "melting_pot"), d))
+        if len({os.path.basename(s[4]) for s in args.specs}) < len(args.specs):
+            ap.error("two --folders have the same name")
     if args.out and len(args.specs) > 1:
         ap.error("--out names one folder; use --out-root with several runs")
     if args.envs % args.minibatches:
@@ -165,11 +185,13 @@ def make_train_step(env, learner, num_envs, rollout, ia_gamma, ia_lambda):
 def run_identity(run_spec, args):
     """A run's folder name and the settings that make it that run (also used by
     colab_runner.py, which checks folders on this PC before a cloud machine resumes them)."""
-    town, players, seed, dirt = run_spec
+    town, players, seed, dirt = run_spec[:4]
     alpha, beta = PLAYERS[players]
     settings = {"town": town, "players": players, "seed": seed, "dirt": dirt,
                 "alpha": alpha if args.alpha is None else args.alpha,
                 "beta": beta if args.beta is None else args.beta}
+    if len(run_spec) > 4:   # a run from --folders: named after its folder
+        return os.path.basename(run_spec[4]), settings
     # (Melting Pot's dirt rule adds nothing to the name, so older runs still resume.)
     name = f"{town}_{players}_s{seed}" + ("" if dirt == "melting_pot" else f"_{dirt}")
     return name, settings
@@ -182,10 +204,11 @@ class Run:
         import jax
         import jax.numpy as jnp
         self.jax, self.jnp = jax, jnp
-        self.town, self.players, self.seed, self.dirt = run_spec
+        self.town, self.players, self.seed, self.dirt = run_spec[:4]
         self.name, settings = run_identity(run_spec, args)
         self.alpha, self.beta = settings["alpha"], settings["beta"]
-        self.out = args.out or os.path.join(args.out_root, self.name)
+        folder = run_spec[4] if len(run_spec) > 4 else None
+        self.out = folder or args.out or os.path.join(args.out_root, self.name)
         self.args, self.env, self.learner, self.train_step = args, env, learner, train_step
         town_train.check_folder(self.out, args, settings, SAME_ON_RESUME)
         self.tw = env.town(self.town, args.river, args.feed_reward, args.feed_period,
