@@ -116,6 +116,15 @@ players clean about 50 per player per 1,000 steps; a river that never gets dirty
   (53-94), and with fair-minded players it was in the middle. Strangers ate more than neighbours
   with selfish players and less with fair-minded ones. Knowing who's who, or seeing who cleaned,
   made no difference we can tell apart from chance.
+- **The connected town's players mostly ignore the badge.** We played them again with their
+  learning switched off, once with the badge shown and once hidden (same luck, about 3,900
+  games each, repeated with different luck; `sims/jaxtown/badge_check.py`). The selfish players
+  cleaned and ate the same either way, and the badge moved their choices barely more than it
+  moves players from the neighbours town, who never learned anything about badges. Fair-minded
+  players reacted a little more, but cleaned slightly more without it, and one of their towns
+  ate about 10% more apples. The badge did show who cleaned most (one player per town lit 37-50%
+  of the time, the rest 13-36%). Nobody learned to act on it: seeing who cleaned gives no way to
+  reward them, and zapping a free rider earns nothing.
 - **Fair-minded players didn't do better.** They ate less than selfish players in two towns and
   more in one, and the two seeds agreed on the direction only for strangers (less) and
   neighbours (slightly more). This matches the 300M-step runs: Hughes et al.'s guilt didn't get
@@ -248,14 +257,17 @@ cd /mnt/c/dev/new-melting-pot
 # charts and tables of the towns (one per kind of player)
 ~/venvs/meltingpot/bin/python sims/town/report.py out/jaxtown/towns/*_selfish_s* --group \
     --out out/jaxtown/writeup/four-towns-selfish.png
+# do the connected town's players use the badge? (about 10 minutes)
+~/venvs/meltingpot/bin/python sims/jaxtown/badge_check.py --runs out/jaxtown/towns \
+    --out out/jaxtown/badge_check
 # the newcomers: make the 64 run folders, train them (about 13 hours), chart and tables
 ~/venvs/meltingpot/bin/python sims/jaxtown/newcomers.py make --sources out/jaxtown/towns
 ~/venvs/meltingpot/bin/python sims/jaxtown/newcomers.py train
 ~/venvs/meltingpot/bin/python sims/jaxtown/newcomers.py report --out out/jaxtown/writeup/newcomers.png
 ```
 
-(Here seed 1's towns were in `out/colab/towns`, so the town charts were given both folders'
-runs, and `make` was given `--sources out/jaxtown/towns out/colab/towns`.)
+(Here seed 1's towns were in `out/colab/towns`, so the town charts and the badge check were
+given both folders, and `make` was given `--sources out/jaxtown/towns out/colab/towns`.)
 
 <details>
 <summary>Every town, each seed (last 10% of 100M steps)</summary>
