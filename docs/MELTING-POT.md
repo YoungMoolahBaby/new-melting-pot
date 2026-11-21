@@ -103,9 +103,9 @@ wsl -d Ubuntu-24.04 -e bash -lc 'cd /mnt/c/dev/new-melting-pot && ~/venvs/meltin
 
 Ctrl-C saves checkpoints; `--resume` carries on (it refuses if the settings changed, and a new run
 refuses a folder that already holds one). Tests: `~/venvs/meltingpot/bin/python -m pytest
-sims/town/tests -q` (18 tests, about 2.5 minutes; the JAX version's 47 are in
+sims/town/tests -q` (18 tests, about 2.5 minutes; the JAX version's 50 are in
 `sims/jaxtown/tests`, about half an hour on the CPU, most of it the Colab and Cloud runners'
-drills; `pytest sims` runs all 65). The players only see their own view, shrunk to
+drills; `pytest sims` runs all 68). The players only see their own view, shrunk to
 22×22 (2×2 pixels per map cell), and whether their zap beam is ready. They don't get Clean Up's
 `NUM_OTHERS_WHO_CLEANED_THIS_STEP` count, so the only way to know who cleaned is to see it.
 
@@ -455,3 +455,26 @@ The results are in [experiments/01-newcomers.md](experiments/01-newcomers.md). H
   locals, and a control's from the other seed. Runs with the same seed start from the same
   weights, so that compared siblings with strangers. The first batch showed it within minutes;
   newcomers now always come from the other seed.
+
+### The co-op (2026-11-21)
+
+A rule of our own, off by default: the connecting AI takes a share of every apple eaten and splits
+it evenly between the players who cleaned in the last 50 frames (the badge's record). An eater who
+cleaned recently gets some of it back. While nobody has cleaned recently, eaters keep their apples
+whole. It moves reward between players and never changes the game. We tried it instead of envy
+because Hughes et al. 2018 found envy ("disadvantageous inequity aversion") doesn't help in Clean
+Up: punishing others "does not directly increase the attractiveness of waste cleaning".
+
+- **How to run it:** a fifth part of a run, `town:players:seed:dirt:share`, e.g.
+  `connected:selfish:0:melting_pot:0.25`, or `--coop-share 0.25` for every run. The run's folder
+  gets `_coop25` and its `config.json` a `coop_share`. Runs from before the co-op resume as share 0.
+- **Checked side by side** with the game before the co-op, 16 games × 3,000 frames of random
+  moves in the connected, neighbours and isolating towns:
+  - share 0 is identical bit for bit (state, views, rewards, game endings);
+  - share 0.5 plays the identical game, and each frame's total reward stays the same, up to rounding.
+- **Tests:** the payout sums to zero and pays the right players; share 0.5 changes rewards only;
+  the share belongs to the run, and old runs still resume.
+- **Fair players** compare what they get after the co-op.
+- **Sustainability** (when apples are eaten) counts the game's own rewards, not the payouts.
+- **A first pilot** ran on 2026-11-21 (connected town, selfish players, 2 seeds, shares 10%, 25%,
+  50% and 100%, 20M steps each, `--river hughes`). Its write-up is still to come.

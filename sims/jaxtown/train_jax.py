@@ -45,8 +45,9 @@ METRIC_FIELDS = town_train.METRIC_FIELDS
 # the average of all seven players' apples, so anyone's apple counts for everyone.
 PLAYERS = {**town_train.PLAYERS, "shared": (0.0, 0.0)}
 SHARED = ("shared",)
-# Batch shape and the dirt rule change what's learned too.
-SAME_ON_RESUME = town_train.SAME_ON_RESUME + ("envs", "minibatches", "dtype", "dirt")
+# Batch shape, the dirt rule and the co-op change what's learned too.
+SAME_ON_RESUME = town_train.SAME_ON_RESUME + ("envs", "minibatches", "dtype", "dirt",
+                                              "coop_share")
 # Per-player episode totals kept during a game: reward, apples, cleaned, zaps, feed,
 # sum of frames with a reward, number of frames with a reward.
 ACC = ("ret", "ate", "cleaned", "zaps", "feed", "t_reward", "n_reward")
@@ -55,8 +56,9 @@ ACC = ("ret", "ate", "cleaned", "zaps", "feed", "t_reward", "n_reward")
 def parse(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", nargs="+", default=None,
-                    help="town:players[:seed[:dirt]] ..., e.g. neighbours:selfish "
-                         "neighbours:fair:0:capped (seed and dirt default to --seed, --dirt)")
+                    help="town:players[:seed[:dirt[:coop share]]] ..., e.g. neighbours:selfish "
+                         "neighbours:fair:0:capped connected:selfish:0:melting_pot:0.25 (seed, "
+                         "dirt and co-op share default to --seed, --dirt, --coop-share)")
     ap.add_argument("--town", choices=spec.TOWNS, default="neighbours")
     ap.add_argument("--players", choices=sorted(PLAYERS), default="selfish")
     ap.add_argument("--seed", type=int, default=0)
@@ -83,6 +85,9 @@ def parse(argv=None):
     ap.add_argument("--dirt", choices=spec.DIRT_RULES, default="melting_pot",
                     help="how dirt arrives (spec.DIRT_RULES): melting_pot until the river is "
                          "full, capped stops at 40%% dirty")
+    ap.add_argument("--coop-share", type=float, default=0.0,
+                    help="the co-op (cleanup.coop_payout): this share of every apple eaten goes "
+                         "to the players who cleaned in the last 50 frames; 0 = none")
     ap.add_argument("--ckpt-minutes", type=float, default=10.0)
     ap.add_argument("--out-root", default=os.path.join("out", "jaxtown"))
     ap.add_argument("--out", default=None, help="exact output folder (one run only)")
@@ -92,15 +97,27 @@ def parse(argv=None):
                          "holds config.json + ckpt.pkl, e.g. made by newcomers.py); with "
                          "--resume, instead of --runs")
     args = ap.parse_args(argv)
+    def share_ok(text):
+        try:
+            return 0.0 <= float(text) <= 1.0
+        except ValueError:
+            return False
+
+    if not share_ok(args.coop_share):
+        ap.error("--coop-share must be between 0 and 1")
+    # A run spec: (town, players, seed, dirt, co-op share[, folder]).
     args.specs = []
     for s in args.runs or [f"{args.town}:{args.players}:{args.seed}:{args.dirt}"]:
         parts = s.split(":")
-        if (not 2 <= len(parts) <= 4 or parts[0] not in spec.TOWNS or parts[1] not in PLAYERS
-                or (len(parts) == 4 and parts[3] not in spec.DIRT_RULES)):
-            ap.error(f"bad run {s!r}: write town:players[:seed[:dirt]], town in {spec.TOWNS}, "
-                     f"players in {sorted(PLAYERS)}, dirt in {spec.DIRT_RULES}")
+        if (not 2 <= len(parts) <= 5 or parts[0] not in spec.TOWNS or parts[1] not in PLAYERS
+                or (len(parts) >= 4 and parts[3] not in spec.DIRT_RULES)
+                or (len(parts) == 5 and not share_ok(parts[4]))):
+            ap.error(f"bad run {s!r}: write town:players[:seed[:dirt[:coop share]]], town in "
+                     f"{spec.TOWNS}, players in {sorted(PLAYERS)}, dirt in {spec.DIRT_RULES}, "
+                     "co-op share from 0 to 1")
         args.specs.append((parts[0], parts[1], int(parts[2]) if len(parts) > 2 else args.seed,
-                           parts[3] if len(parts) > 3 else args.dirt))
+                           parts[3] if len(parts) > 3 else args.dirt,
+                           float(parts[4]) if len(parts) > 4 else args.coop_share))
     if args.folders:
         if args.runs or args.out:
             ap.error("--folders names its runs itself: drop --runs and --out")
@@ -114,8 +131,8 @@ def parse(argv=None):
             with open(os.path.join(d, "config.json")) as f:
                 cfg = json.load(f)
             args.specs.append((cfg["town"], cfg["players"], cfg["seed"],
-                               cfg.get("dirt", "melting_pot"), d))
-        if len({os.path.basename(s[4]) for s in args.specs}) < len(args.specs):
+                               cfg.get("dirt", "melting_pot"), cfg.get("coop_share", 0.0), d))
+        if len({os.path.basename(s[5]) for s in args.specs}) < len(args.specs):
             ap.error("two --folders have the same name")
     if args.out and len(args.specs) > 1:
         ap.error("--out names one folder; use --out-root with several runs")
@@ -150,7 +167,8 @@ def make_train_step(env, learner, num_envs, rollout, ia_gamma, ia_lambda):
             smoothed = ppo.smooth_rewards(smoothed, paid, ia_gamma, ia_lambda)
             subjective = ppo.inequity_reward(paid, smoothed, alpha, beta)
             smoothed = jnp.where(done[:, None], 0.0, smoothed)
-            got = (reward > 0).astype(jnp.float32)
+            # Sustainability times the game's own rewards (apples, feed), not co-op payouts.
+            got = (info["ate"] + info["feed"] > 0).astype(jnp.float32)
             acc = acc + jnp.stack([reward, info["ate"], info["cleaned"], info["zaps"],
                                    info["feed"], info["length"][:, None] * got, got], -1)
             # Keep each finished game's totals (at most one per env per rollout, since
@@ -185,15 +203,18 @@ def make_train_step(env, learner, num_envs, rollout, ia_gamma, ia_lambda):
 def run_identity(run_spec, args):
     """A run's folder name and the settings that make it that run (also used by
     colab_runner.py, which checks folders on this PC before a cloud machine resumes them)."""
-    town, players, seed, dirt = run_spec[:4]
+    town, players, seed, dirt, share = run_spec[:5]
     alpha, beta = PLAYERS[players]
     settings = {"town": town, "players": players, "seed": seed, "dirt": dirt,
+                "coop_share": share,
                 "alpha": alpha if args.alpha is None else args.alpha,
                 "beta": beta if args.beta is None else args.beta}
-    if len(run_spec) > 4:   # a run from --folders: named after its folder
-        return os.path.basename(run_spec[4]), settings
-    # (Melting Pot's dirt rule adds nothing to the name, so older runs still resume.)
-    name = f"{town}_{players}_s{seed}" + ("" if dirt == "melting_pot" else f"_{dirt}")
+    if len(run_spec) > 5:   # a run from --folders: named after its folder
+        return os.path.basename(run_spec[5]), settings
+    # (Melting Pot's dirt rule and no co-op add nothing to the name, so older runs still
+    # resume.)
+    name = (f"{town}_{players}_s{seed}" + ("" if dirt == "melting_pot" else f"_{dirt}")
+            + (f"_coop{share * 100:g}" if share else ""))
     return name, settings
 
 
@@ -204,15 +225,15 @@ class Run:
         import jax
         import jax.numpy as jnp
         self.jax, self.jnp = jax, jnp
-        self.town, self.players, self.seed, self.dirt = run_spec[:4]
+        self.town, self.players, self.seed, self.dirt, self.coop_share = run_spec[:5]
         self.name, settings = run_identity(run_spec, args)
         self.alpha, self.beta = settings["alpha"], settings["beta"]
-        folder = run_spec[4] if len(run_spec) > 4 else None
+        folder = run_spec[5] if len(run_spec) > 5 else None
         self.out = folder or args.out or os.path.join(args.out_root, self.name)
         self.args, self.env, self.learner, self.train_step = args, env, learner, train_step
         town_train.check_folder(self.out, args, settings, SAME_ON_RESUME)
         self.tw = env.town(self.town, args.river, args.feed_reward, args.feed_period,
-                           args.badge_frames, self.dirt)
+                           args.badge_frames, self.dirt, self.coop_share)
         self.reward_args = (jnp.float32(self.alpha), jnp.float32(self.beta),
                             jnp.asarray(self.players in SHARED))
 
@@ -234,8 +255,8 @@ class Run:
             params, opt = self.learner.init(k)
             config = {k: v for k, v in vars(args).items() if k not in ("specs", "runs")}
             config.update(game="jaxtown", town=self.town, players=self.players, seed=self.seed,
-                          dirt=self.dirt, alpha=self.alpha, beta=self.beta, num_envs=args.envs,
-                          ppo=self.learner.cfg._asdict())
+                          dirt=self.dirt, coop_share=self.coop_share, alpha=self.alpha,
+                          beta=self.beta, num_envs=args.envs, ppo=self.learner.cfg._asdict())
             with open(os.path.join(self.out, "config.json"), "w") as f:
                 json.dump(config, f, indent=2)
         key, k_env = jax.random.split(key)
@@ -330,7 +351,8 @@ def main(argv=None):
     for i, r in enumerate(runs):
         r.device = devices[i % len(devices)] if len(devices) > 1 else None
         r.setup()
-    print("runs:", ", ".join(f"{r.name} (alpha {r.alpha}, beta {r.beta}, dirt {r.dirt})"
+    print("runs:", ", ".join(f"{r.name} (alpha {r.alpha}, beta {r.beta}, dirt {r.dirt}"
+                             + (f", co-op {r.coop_share:g})" if r.coop_share else ")")
                              for r in runs),
           f"| {args.envs} games each, river {args.river} | target {int(args.steps):,} steps "
           f"each | {min(len(devices), len(runs))} of {len(devices)} {devices[0].platform} "

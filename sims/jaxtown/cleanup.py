@@ -40,6 +40,10 @@ One rule of our own, off by default: town(dirt="capped") stops dirt arriving whi
 or more of the river is dirty, as the open Sequential Social Dilemma Games Cleanup does
 (spec.DIRT_RULES). Melting Pot's dirt keeps coming until the river is full.
 
+And a co-op, also ours and off by default: town(coop_share=f) has the connecting AI take
+a share f of every apple eaten and split it evenly between the players who cleaned in the
+last 50 frames (the badge's record, coop_payout). It changes rewards only, never the game.
+
 Known simplifications, kept small: zap beams all fire before clean beams (Melting
 Pot interleaves them in random order); while out, a zapped player still sees the
 live world from where they were hit (what Melting Pot shows an off-board player is
@@ -125,6 +129,7 @@ class Town(struct.PyTreeNode):
     start_dirt: jnp.ndarray     # [R] bool: which river cells start dirty
     dirt_spawns: jnp.ndarray    # bool: False on the clean river (sanity check)
     dirt_cap: jnp.ndarray       # float: no new dirt while this share is dirty (1.0: never stops)
+    coop_share: jnp.ndarray     # float: share of each apple paid to recent cleaners (0: none)
 
 
 class State(struct.PyTreeNode):
@@ -140,6 +145,16 @@ class State(struct.PyTreeNode):
     cleaned_prev: jnp.ndarray   # [P] bool cleaned last frame (the badge lags a frame)
     feed_t: jnp.ndarray         # [P] int32 frames until the next feed payout
     t: jnp.ndarray              # int32 frames played
+
+
+def coop_payout(ate, lit, share):
+    """The co-op's change to each player's reward this frame, [P] (it sums to 0): every
+    apple eaten pays `share` of itself into a pot, split evenly between the `lit` players
+    (cleaned recently), an eater among them included. While nobody is lit, eaters keep
+    their apples whole."""
+    n = lit.sum()
+    pot = share * ate.sum()
+    return jnp.where(n > 0, pot * lit / jnp.maximum(n, 1) - share * ate, 0.0)
 
 
 def episode_ends(key, frame):
@@ -202,13 +217,17 @@ class CleanUp:
 
     def town(self, name: str = "neighbours", river: str | None = "melting_pot",
              feed_reward: float = spec.FEED_REWARD, feed_period: int = spec.FEED_PERIOD,
-             badge_frames: int = spec.BADGE_FRAMES, dirt: str = "melting_pot") -> Town:
+             badge_frames: int = spec.BADGE_FRAMES, dirt: str = "melting_pot",
+             coop_share: float = 0.0) -> Town:
         """Settings for one of spec.TOWNS. `river=None` keeps the dirt drawn in the
-        map rows given to the constructor (for test maps). `dirt`: one of spec.DIRT_RULES."""
+        map rows given to the constructor (for test maps). `dirt`: one of spec.DIRT_RULES.
+        `coop_share`: see coop_payout."""
         if name not in spec.TOWNS:
             raise ValueError(f"town must be one of {spec.TOWNS}, not {name!r}")
         if dirt not in spec.DIRT_RULES:
             raise ValueError(f"dirt must be one of {spec.DIRT_RULES}, not {dirt!r}")
+        if not 0.0 <= coop_share <= 1.0:
+            raise ValueError(f"coop_share must be between 0 and 1, not {coop_share!r}")
         if river is None:
             start = self._start_dirt_rows
         else:
@@ -222,7 +241,8 @@ class CleanUp:
                     badge_frames=jnp.asarray(badge_frames, jnp.int32),
                     start_dirt=jnp.asarray(start),
                     dirt_spawns=jnp.asarray(river != "clean"),
-                    dirt_cap=jnp.asarray(spec.DIRT_CAP[dirt], jnp.float32))
+                    dirt_cap=jnp.asarray(spec.DIRT_CAP[dirt], jnp.float32),
+                    coop_share=jnp.asarray(coop_share, jnp.float32))
 
     # --- reset and step -----------------------------------------------------------
 
@@ -247,11 +267,13 @@ class CleanUp:
         """
         k_frame, k_end, k_reset = jax.random.split(key, 3)
         nxt, info = self._frame(k_frame, state, jnp.asarray(actions, jnp.int32), town)
+        # Lit badges as players see them this frame (cleaned in the last badge_frames).
+        coop = coop_payout(info["ate"], nxt.badge_t > 0, town.coop_share)
         done = episode_ends(k_end, nxt.t)
         fresh = self.reset(k_reset, town)
         nxt = jax.tree.map(lambda a, b: jnp.where(done, a, b), fresh, nxt)
         obs, ready = self.observe(nxt, town)
-        reward = info["ate"] + info["feed"]
+        reward = info["ate"] + info["feed"] + coop
         return nxt, obs, ready, reward, done, info
 
     def _frame(self, key, s: State, act, town: Town):

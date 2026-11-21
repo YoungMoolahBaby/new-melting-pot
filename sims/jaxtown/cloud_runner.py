@@ -149,7 +149,8 @@ def without_runs(argv):
 
 
 def spec_text(spec):
-    return ":".join(str(x) for x in spec)
+    """A run spec as train_jax.py --runs takes it (no co-op: the four parts as before)."""
+    return ":".join(str(x) for x in spec[:4]) + (f":{spec[4]:g}" if spec[4] else "")
 
 
 class Slot:

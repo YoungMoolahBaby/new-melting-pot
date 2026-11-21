@@ -88,3 +88,22 @@ def test_finished_games_are_logged_like_melting_pots(tmp_path):
     for key in ("collective_return", "equality", "cleaned_total", "zaps_total",
                 "top2_clean_share", "feed", "sustainability"):
         assert key in eps[0]
+
+
+def test_coop_share_belongs_to_the_run_and_old_runs_still_resume(tmp_path):
+    root = ["--steps", "32", "--out-root", str(tmp_path), *TINY]
+    jtrain.main(["--runs", "connected:selfish:0:melting_pot:0.25", "neighbours:selfish", *root])
+    with open(tmp_path / "connected_selfish_s0_coop25" / "config.json") as f:
+        assert json.load(f)["coop_share"] == 0.25
+    # A run from before the co-op has no coop_share in its config: it carries on as 0.
+    path = tmp_path / "neighbours_selfish_s0" / "config.json"
+    with open(path) as f:
+        cfg = json.load(f)
+    assert cfg.pop("coop_share") == 0.0
+    with open(path, "w") as f:
+        json.dump(cfg, f)
+    jtrain.main(["--runs", "neighbours:selfish", "--resume", *root, "--steps", "64"])
+    assert rows(tmp_path / "neighbours_selfish_s0" / "metrics.csv")[-1].split(",")[1] == "64"
+    for bad in ("connected:selfish:0:melting_pot:1.5", "connected:selfish:0:melting_pot:x"):
+        with pytest.raises(SystemExit):
+            jtrain.parse(["--runs", bad])

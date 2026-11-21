@@ -340,3 +340,40 @@ def test_feed_pays_every_4_frames_only_in_isolating_town():
         assert sum(x for _, x in paid) == pytest.approx(expect)
         if expect:
             assert [f for f, _ in paid] == list(range(4, 41, 4))
+
+
+def test_coop_payout_moves_a_share_of_each_apple_to_recent_cleaners():
+    ate = jnp.array([1.0, 0, 0, 1, 0, 0, 0])
+    lit = jnp.array([False, True, True, True, False, False, False])
+    got = np.asarray(cu.coop_payout(ate, lit, 0.3))
+    # A pot of 0.6 split by the 3 lit players, 0.2 each; each eater pays 0.3 (player 3
+    # eats and is lit, so pays 0.3 and gets 0.2 back).
+    np.testing.assert_allclose(got, [-0.3, 0.2, 0.2, -0.1, 0, 0, 0], atol=1e-6)
+    assert abs(got.sum()) < 1e-6
+    assert not np.asarray(cu.coop_payout(ate, jnp.zeros(7, bool), 0.3)).any()  # nobody lit
+    assert not np.asarray(cu.coop_payout(ate, lit, 0.0)).any()
+    with pytest.raises(ValueError, match="coop_share"):
+        cu.CleanUp().town("connected", coop_share=1.5)
+
+
+def test_coop_changes_rewards_only_never_the_game():
+    env, n, frames = cu.CleanUp(), 8, 1500
+
+    def play(tw):
+        def one(es, k):
+            ka, ks = jax.random.split(k)
+            acts = jax.random.randint(ka, (n, env.num_players), 0, 9)
+            out = jax.vmap(env.step, (0, 0, 0, None))(jax.random.split(ks, n), es, acts, tw)
+            return out[0], out
+        es = jax.vmap(env.reset, (0, None))(jax.random.split(jax.random.PRNGKey(3), n), tw)
+        keys = jax.random.split(jax.random.PRNGKey(4), frames)
+        return jax.device_get(jax.jit(lambda e: jax.lax.scan(one, e, keys))(es)[1])
+
+    plain = play(env.town("connected", "hughes"))
+    coop = play(env.town("connected", "hughes", coop_share=0.5))
+    for i in (0, 1, 2, 4, 5):            # state, views, ready, done, info: the same game
+        for a, b in zip(jax.tree_util.tree_leaves(plain[i]), jax.tree_util.tree_leaves(coop[i])):
+            assert np.array_equal(a, b)
+    r0, r1 = np.asarray(plain[3]), np.asarray(coop[3])
+    np.testing.assert_allclose(r0.sum(-1), r1.sum(-1), atol=1e-5)   # nothing made or lost
+    assert np.abs(r0 - r1).sum() > 1                                 # but apples changed hands

@@ -109,6 +109,7 @@ def check_folder(out, args, run_settings, same_on_resume=SAME_ON_RESUME):
             saved = json.load(f)
         saved.setdefault("river", "melting_pot")   # runs from before --river existed
         saved.setdefault("dirt", "melting_pot")    # JAX runs from before --dirt existed
+        saved.setdefault("coop_share", 0.0)        # JAX runs from before the co-op existed
         now = {**vars(args), **run_settings}
         diff = {k: (saved.get(k), now.get(k)) for k in same_on_resume
                 if saved.get(k) != now.get(k)}
