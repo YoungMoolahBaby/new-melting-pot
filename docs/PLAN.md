@@ -1,7 +1,8 @@
 # Plan
 
-**Status (2026-11-18):** experiment 1 (newcomers in Clean Up) is built and being checked; see
-[MELTING-POT.md](MELTING-POT.md). This page is the thinking behind it.
+**Status (2026-11-21):** experiment 1 (four towns and their newcomers in Clean Up) has had its
+first round; the write-up is [experiments/01-newcomers.md](experiments/01-newcomers.md), the
+code and checks are in [MELTING-POT.md](MELTING-POT.md). This page is the thinking behind it.
 
 ## The idea
 

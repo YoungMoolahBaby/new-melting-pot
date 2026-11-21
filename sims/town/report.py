@@ -112,6 +112,35 @@ def combine(series):
     return grid, ys.mean(0), ys.min(0), ys.max(0)
 
 
+def spread(ys, gap, low, high):
+    """Label heights near `ys`, at least `gap` apart and inside [low, high], in the same
+    order as ys."""
+    order = np.argsort(ys)
+    placed = np.array(ys, float)[order]
+    for i in range(1, len(placed)):                  # push up past the one below
+        placed[i] = max(placed[i], placed[i - 1] + gap)
+    if len(placed) and placed[-1] > high:            # then back down under the top
+        placed[-1] = high
+        for i in range(len(placed) - 2, -1, -1):
+            placed[i] = min(placed[i], placed[i + 1] - gap)
+    placed = np.maximum(placed, low)
+    out = np.empty_like(placed)
+    out[order] = placed
+    return out
+
+
+def direct_labels(fig, ax, ends, fontsize=9):
+    """Name each line just right of its end; labels that would touch are spread apart."""
+    from matplotlib.transforms import offset_copy
+    if not ends:
+        return
+    lo, hi = ax.get_ylim()
+    ys = spread([y for _, y, _ in ends], 0.055 * (hi - lo), lo, hi)
+    shift = offset_copy(ax.transData, fig=fig, x=4, units="points")
+    for (x, _, text), y in zip(ends, ys):
+        ax.text(x, y, text, transform=shift, va="center", fontsize=fontsize, color=INK2)
+
+
 def chart(groups, out, title):
     """groups: [(label, short label, [runs])]; several runs in a group are drawn as
     their mean with a band from the lowest to the highest run."""
@@ -134,6 +163,7 @@ def chart(groups, out, title):
         ax.set_axisbelow(True)
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
+    ends = [[] for _ in axes]
     for i, (lab, short, runs) in enumerate(groups):
         colour = SERIES[i % len(SERIES)]
         per_run = [run_series(m, e) for m, e, _ in runs]
@@ -143,13 +173,14 @@ def chart(groups, out, title):
                 ax.fill_between(sx, ylo, yhi, color=colour, alpha=0.15, linewidth=0)
             ax.plot(sx, sy, color=colour, linewidth=1.5, label=lab, solid_capstyle="round")
             ok = np.isfinite(sy)
-            # Direct label at the line's end, in text ink; past 4 lines, the legend alone.
-            if ok.any() and len(groups) <= 4:
-                ax.annotate(short, (sx[ok][-1], sy[ok][-1]), xytext=(4, 0),
-                            textcoords="offset points", va="center", fontsize=9, color=INK2)
-    for ax in axes:
+            if ok.any():
+                ends[p].append((sx[ok][-1], sy[ok][-1], short))
+    for ax, panel_ends in zip(axes, ends):
         ax.set_ylim(bottom=0)
         ax.margins(x=0.1)
+        # Direct labels at the lines' ends, in text ink; past 4 lines, the legend alone.
+        if len(groups) <= 4:
+            direct_labels(fig, ax, panel_ends)
     handles, labels = axes[0].get_legend_handles_labels()
     fig.suptitle(title, x=0.01, y=0.99, ha="left", fontsize=12, color=INK)
     ncol = min(len(groups), 4 if max(len(lab) for lab, _, _ in groups) <= 40 else 2)
@@ -203,6 +234,9 @@ def main(argv=None):
                                                    for k in varying)
 
     groups = {}
+    # Line-end labels name what tells the lines apart: the town when only towns differ.
+    by_town = (len({cfg["town"] for _, _, cfg in runs}) > 1
+               and len({cfg["players"] for _, _, cfg in runs}) == 1)
     for i, run in enumerate(runs):
         cfg = run[2]
         lab = run_label(cfg)
@@ -211,7 +245,8 @@ def main(argv=None):
                    *(str(get(cfg, k)) for k in setting))
         else:
             key, lab = i, f"{lab}, seed {cfg.get('seed', 0)}"
-        short = cfg["players"] + (" JAX" if show_game and cfg.get("game") == "jaxtown" else "")
+        short = ((cfg["town"] if by_town else cfg["players"])
+                 + (" JAX" if show_game and cfg.get("game") == "jaxtown" else ""))
         groups.setdefault(key, (lab, short, []))[2].append(run)
     groups = [(lab + (f" ({len(rs)} seeds)" if len(rs) > 1 else ""), short, rs)
               for lab, short, rs in groups.values()]

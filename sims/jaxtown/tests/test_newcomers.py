@@ -131,3 +131,37 @@ def test_train_runs_every_folder_a_batch_at_a_time_and_skips_finished_ones(sourc
     assert queue.count("exited with code 0") == 2 and "every batch finished" in queue
     nc.train(out, steps=UPD, batch=4, moves=moves, ckpt_minutes=0)   # all done: no batch runs
     assert open(os.path.join(out, "queue.log")).read().count("starting") == 2
+
+
+def _games(folder, games):
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, "episodes.jsonl"), "w") as f:
+        for g in games:
+            f.write(json.dumps(g) + "\n")
+
+
+def _game(steps, cleaned, ate, length=1000):
+    return {"env_steps": steps, "length": length, "cleaned": cleaned, "ate": ate}
+
+
+def test_report_measures_newcomers_and_locals_before_and_after(tmp_path):
+    host, home = str(tmp_path / "isolating_selfish_s0"), str(tmp_path / "strangers_selfish_s1")
+    # Before the move only the last 10% of each run counts (steps 90 to 100 here).
+    _games(host, [_game(10, [99] * 7, [9] * 7), _game(95, [10] * 7, [0] * 7)])
+    _games(home, [_game(10, [0] * 7, [0] * 7), _game(95, [80] * 3 + [1] * 4, [5] * 7, 2000)])
+    move = nc.Move("isolating", "strangers", "selfish", 0, 1)
+    folder = os.path.join(str(tmp_path / "newcomers"), move.name)
+    _games(folder, [_game(s, [c] * 3 + [10] * 4, [1] * 7)
+                    for s, c in ((1e6, 40), (2e6, 30), (12e6, 99), (19e6, 10), (20e6, 10))])
+    json.dump({"newcomers": {"host_run": host, "newcomers_run": home, "steps_before": 100}},
+              open(os.path.join(folder, "config.json"), "w"))
+    (r,) = nc.summarise(str(tmp_path / "newcomers"), [move])
+    assert r["kind"] == "into the isolating town"
+    assert (r["home_new_clean"], r["host_local_clean"], r["host_apples"]) == (40, 10, 0)
+    assert r["early"]["new_clean"] == 35 and r["late"]["new_clean"] == 10    # 0-2M, 18-20M
+    assert r["late"]["local_clean"] == 10 and r["late"]["apples"] == 7
+    assert nc.gap_closed(r) == pytest.approx(1.0)        # all the way to the locals' 10
+    groups, per_move = nc.report_tables([r])
+    assert "| into the isolating town | 1 | 40, 35, 10 | 10, 10 | 0.0, 7.0, 7.0 | 100%" in groups
+    nc.report_chart([r], str(tmp_path / "chart.png"))
+    assert os.path.getsize(tmp_path / "chart.png") > 10_000

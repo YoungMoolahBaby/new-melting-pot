@@ -1,10 +1,12 @@
 # new-melting-pot
 
 People and AI working together to undo enshittification, simulated in DeepMind's Melting Pot.
-**Experiment 1 under way.** Read first:
+**Experiment 1's first round done (2026-11-21).** Read first:
 - `docs/PLAN.md`: the idea, ground rules, decisions (D-numbers), what's next. **Start here.**
 - `docs/QUESTIONS.md`: every open question, parked.
-- `docs/MELTING-POT.md`: the games, how to run Melting Pot (WSL2 on Windows), experiment 1.
+- `docs/MELTING-POT.md`: the games, how to run Melting Pot (WSL2 on Windows), experiment 1's
+  code and checks.
+- `docs/experiments/01-newcomers.md`: experiment 1's write-up (four towns and their newcomers).
 
 ## Rules
 

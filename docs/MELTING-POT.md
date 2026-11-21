@@ -103,8 +103,9 @@ wsl -d Ubuntu-24.04 -e bash -lc 'cd /mnt/c/dev/new-melting-pot && ~/venvs/meltin
 
 Ctrl-C saves checkpoints; `--resume` carries on (it refuses if the settings changed, and a new run
 refuses a folder that already holds one). Tests: `~/venvs/meltingpot/bin/python -m pytest
-sims/town/tests -q` (18 tests, about 2.5 minutes; the JAX version's 25 are in
-`sims/jaxtown/tests`, about 3 minutes; `pytest sims` runs all 43 in about 6). The players only see their own view, shrunk to
+sims/town/tests -q` (18 tests, about 2.5 minutes; the JAX version's 46 are in
+`sims/jaxtown/tests`, about half an hour on the CPU, most of it the Colab and Cloud runners'
+drills; `pytest sims` runs all 64). The players only see their own view, shrunk to
 22×22 (2×2 pixels per map cell), and whether their zap beam is ready. They don't get Clean Up's
 `NUM_OTHERS_WHO_CLEANED_THIS_STEP` count, so the only way to know who cleaned is to see it.
 
@@ -435,3 +436,22 @@ cd /mnt/c/dev/new-melting-pot && ~/venvs/meltingpot/bin/python sims/jaxtown/clou
 
   The real `gcloud` commands are written from Google's documentation but haven't run yet: that
   needs a Google Cloud project. The first real test will be a short drill, as on Colab.
+
+### Experiment 1: the four towns and their newcomers (2026-11-19 to 11-21)
+
+The results are in [experiments/01-newcomers.md](experiments/01-newcomers.md). How they ran:
+
+- **The four towns**, selfish and fair-minded, two seeds, 100M steps each, `--river hughes`:
+  back on the 4070 Ti once Colab's free TPUs ran out, eight runs sharing the GPU at about 3,300
+  steps a second each, one seed after the other (about 8 hours each). Seed 1's first 13.5M steps
+  ran on the Colab TPU; it carried on from those checkpoints.
+- **The newcomers:** `sims/jaxtown/newcomers.py`. `make` builds each move's run folder from two
+  finished runs: the locals' weights and optimizer state, with players 1-3 taken from the
+  newcomers' run, and the locals' random key, so every move into one town plays out with the same
+  luck. `train` trains the 64 folders eight at a time through `train_jax.py --folders ...
+  --resume` (a run named after its folder), with the settings they trained with before, and
+  carries on after a stop. `report` draws the chart and writes the tables. 13 hours in all.
+- **A mistake caught early:** the first plan took a move's newcomers from the same seed as the
+  locals, and a control's from the other seed. Runs with the same seed start from the same
+  weights, so that compared siblings with strangers. The first batch showed it within minutes;
+  newcomers now always come from the other seed.

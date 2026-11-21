@@ -25,6 +25,9 @@ are the locals. Its counters start at 0: steps since the move.
         --sources out/jaxtown/towns out/colab/towns --out-root out/jaxtown/newcomers
     # 2. train them 8 at a time (train_jax.py --folders ... --resume); safe to re-run
     ~/venvs/meltingpot/bin/python sims/jaxtown/newcomers.py train --out-root out/jaxtown/newcomers
+    # 3. chart + tables (docs/experiments/01-newcomers.md)
+    ~/venvs/meltingpot/bin/python sims/jaxtown/newcomers.py report --out-root \\
+        out/jaxtown/newcomers --out out/jaxtown/writeup/newcomers.png
 """
 from __future__ import annotations
 
@@ -222,6 +225,219 @@ def train(out_root, steps=STEPS, batch=8, moves=None, ckpt_minutes=10.0, python=
         note("newcomers: every batch finished")
 
 
+# ---- Report: what the newcomers and the locals did -----------------------------------------
+
+LOCAL_SLOTS = tuple(s for s in range(7) if s not in NEWCOMER_SLOTS)
+KINDS = ("into the isolating town", "out of the isolating town", "between ordinary towns",
+         "control, ordinary towns", "control, isolating town")
+EARLY = 0.1   # "just after the move": the first 10% of the steps after it (2M of 20M)
+LATE = 0.1    # "at the end": the last 10% (as sims/town/report.py), and before the move
+BIN = 5e5     # chart: steps per point
+
+
+def kind(move):
+    if move.control:
+        return KINDS[4] if move.host == "isolating" else KINDS[3]
+    if move.host == "isolating":
+        return KINDS[0]
+    return KINDS[1] if move.origin == "isolating" else KINDS[2]
+
+
+def games(run_dir, start=0.0):
+    """A run's finished games (episodes.jsonl) from `start` env steps on."""
+    out = []
+    with open(os.path.join(run_dir, "episodes.jsonl")) as f:
+        for line in f:
+            if line.strip():
+                e = json.loads(line)
+                if e["env_steps"] >= start:
+                    out.append(e)
+    return out
+
+
+def per_1000(eps, key, slots):
+    """`key` (cleaned, ate, ...) of the players in `slots` together, per 1,000 game steps
+    (frames; games differ in length); nan without games."""
+    frames = sum(e["length"] for e in eps)
+    if not frames:
+        return float("nan")
+    return 1000 * sum(float(np.sum(np.asarray(e[key])[list(slots)])) for e in eps) / frames
+
+
+def measures(eps):
+    """Newcomers' and locals' cleaning per player, and the whole town's apples, all per
+    1,000 game steps."""
+    return {"new_clean": per_1000(eps, "cleaned", NEWCOMER_SLOTS) / len(NEWCOMER_SLOTS),
+            "local_clean": per_1000(eps, "cleaned", LOCAL_SLOTS) / len(LOCAL_SLOTS),
+            "apples": per_1000(eps, "ate", range(7))}
+
+
+def summarise(out_root, moves=None):
+    """One row per move: before it (the host's and the newcomers' own runs, last 10%),
+    just after it and at the end; and each move's measures over steps since the move."""
+    cache = {}
+
+    def before(run_dir, steps):
+        if run_dir not in cache:
+            cache[run_dir] = measures(games(run_dir, (1 - LATE) * steps))
+        return cache[run_dir]
+
+    rows = []
+    for m in moves or plan():
+        folder = os.path.join(out_root, m.name)
+        with open(os.path.join(folder, "config.json")) as f:
+            cfg = json.load(f)["newcomers"]
+        host = before(cfg["host_run"], cfg["steps_before"])
+        home = before(cfg["newcomers_run"], cfg["steps_before"])
+        eps = games(folder)
+        done = max(e["env_steps"] for e in eps)
+        early = measures([e for e in eps if e["env_steps"] <= EARLY * done])
+        late = measures([e for e in eps if e["env_steps"] >= (1 - LATE) * done])
+        edges = np.arange(0, done + BIN, BIN)
+        idx = np.searchsorted(edges, [e["env_steps"] for e in eps], side="left")
+        series = {k: [] for k in early}
+        for b in range(1, len(edges)):
+            got = measures([e for e, i in zip(eps, idx) if i == b])
+            for k, v in got.items():
+                series[k].append(v)
+        rows.append({"move": m, "kind": kind(m), "steps": done,
+                     # The newcomers at home are slots 0-2 of their own run.
+                     "home_new_clean": home["new_clean"], "host_local_clean": host["local_clean"],
+                     "host_apples": host["apples"], "early": early, "late": late,
+                     "x": edges[1:] - BIN / 2, "series": series})
+    return rows
+
+
+def gap_closed(r):
+    """How far the newcomers' cleaning moved from their home level toward the locals' level
+    before the move (1 = all the way); nan when the two levels are close."""
+    gap = r["host_local_clean"] - r["home_new_clean"]
+    return (r["late"]["new_clean"] - r["home_new_clean"]) / gap if abs(gap) > 10 else float("nan")
+
+
+def report_tables(rows):
+    def mean(xs):
+        xs = np.asarray(xs, float)
+        return float(np.nanmean(xs)) if np.isfinite(xs).any() else float("nan")
+
+    def rng(xs):
+        xs = np.asarray(xs, float)
+        xs = xs[np.isfinite(xs)]
+        return f"{xs.min():.0%} to {xs.max():.0%}" if len(xs) else ""
+
+    lines = ["| Move | Runs | Newcomers' cleaning: at home, just after, at the end | "
+             "Locals' cleaning: before, at the end | Town's apples: before, just after, at "
+             "the end | Newcomers' gap to the locals closed |",
+             "|---|---|---|---|---|---|"]
+    for k in KINDS:
+        g = [r for r in rows if r["kind"] == k]
+        if not g:
+            continue
+        f = lambda get: mean([get(r) for r in g])  # noqa: E731
+        closed = [gap_closed(r) for r in g]
+        lines.append(
+            f"| {k} | {len(g)} | {f(lambda r: r['home_new_clean']):.0f}, "
+            f"{f(lambda r: r['early']['new_clean']):.0f}, {f(lambda r: r['late']['new_clean']):.0f}"
+            f" | {f(lambda r: r['host_local_clean']):.0f}, {f(lambda r: r['late']['local_clean']):.0f}"
+            f" | {f(lambda r: r['host_apples']):.1f}, {f(lambda r: r['early']['apples']):.1f}, "
+            f"{f(lambda r: r['late']['apples']):.1f} | "
+            # (Only where the two levels are far apart: moves to or from the isolating town.)
+            + (f"{mean(closed):.0%} ({rng(closed)})" if k in KINDS[:2] else "")
+            + " |")
+    groups = "\n".join(lines)
+    lines = ["| Host town | Players | Seed | Newcomers from | Newcomers' cleaning: at home, at "
+             "the end | Locals' cleaning: before, at the end | Town's apples: before, just after, "
+             "at the end |", "|---|---|---|---|---|---|---|"]
+    for r in rows:
+        m = r["move"]
+        lines.append(f"| {m.host} | {m.players} | {m.seed} | {m.origin} (seed {m.origin_seed}) "
+                     f"| {r['home_new_clean']:.0f}, {r['late']['new_clean']:.0f} | "
+                     f"{r['host_local_clean']:.0f}, {r['late']['local_clean']:.0f} | "
+                     f"{r['host_apples']:.1f}, {r['early']['apples']:.1f}, "
+                     f"{r['late']['apples']:.1f} |")
+    return groups, "\n".join(lines)
+
+
+def report_chart(rows, out):
+    """Three panels over steps since the move: the newcomers' cleaning, the locals', and
+    the town's apples; one line per kind of move (mean, band: the middle half of its runs)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import report as town_report   # sims/town/report.py: palette and direct labels
+    P = town_report
+    plt.rcParams.update({"font.size": 10, "axes.edgecolor": P.AXIS, "axes.labelcolor": P.INK2,
+                         "xtick.color": P.MUTED, "ytick.color": P.MUTED, "text.color": P.INK})
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.6), dpi=150, facecolor=P.SURFACE, sharex=True)
+    panels = [("new_clean", "The newcomers' cleaning", "dirt cleaned per player per 1,000 steps"),
+              ("local_clean", "The locals' cleaning", "dirt cleaned per player per 1,000 steps"),
+              ("apples", "The town's apples", "apples eaten per 1,000 steps, all 7")]
+    ends = [[] for _ in axes]
+    for i, k in enumerate(KINDS[:4]):        # the isolating controls stay flat: table only
+        g = [r for r in rows if r["kind"] == k]
+        if not g:
+            continue
+        colour = P.SERIES[i]
+        n = min(len(r["x"]) for r in g)
+        x = g[0]["x"][:n] / 1e6
+        for p, (key, _, _) in enumerate(panels):
+            ys = np.array([r["series"][key][:n] for r in g], float)
+            ok = np.isfinite(ys).all(0)
+            mean = ys[:, ok].mean(0)
+            lo, hi = np.percentile(ys[:, ok], [25, 75], axis=0)
+            axes[p].fill_between(x[ok], lo, hi, color=colour, alpha=0.15, linewidth=0)
+            axes[p].plot(x[ok], mean, color=colour, linewidth=1.5, label=f"{k} ({len(g)} runs)",
+                         solid_capstyle="round")
+            ends[p].append((x[ok][-1], mean[-1], k))
+    # Before the move: where the locals of each kind of town stood.
+    ordinary = [r["host_local_clean"] for r in rows if r["move"].host != "isolating"]
+    isolating = [r["host_local_clean"] for r in rows if r["move"].host == "isolating"]
+    for ax, (key, name, ylabel) in zip(axes, panels):
+        ax.set_facecolor(P.SURFACE)
+        ax.set_title(name, loc="left", fontsize=11, color=P.INK, pad=8)
+        ax.set_ylabel(ylabel)
+        ax.set_xlabel("game steps since the move (millions)")
+        ax.grid(True, color=P.GRID, linewidth=0.6)
+        ax.set_axisbelow(True)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        if key != "apples":   # dotted: the locals before the move, named in the first panel
+            for levels, text in ((ordinary, "ordinary towns' locals before the move"),
+                                 (isolating, "isolating town's locals before the move")):
+                if not levels:
+                    continue
+                level = np.mean(levels)
+                ax.axhline(level, color=P.MUTED, linewidth=1, linestyle=(0, (2, 2)))
+                if key == "new_clean":
+                    ax.text(0.2, level + 1, text, fontsize=8, color=P.MUTED, va="bottom")
+        ax.set_ylim(bottom=0)
+        ax.margins(x=0.1)
+    for ax, panel_ends in zip(axes, ends):
+        P.direct_labels(fig, ax, panel_ends, fontsize=8)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.suptitle("Newcomers: 3 of 7 players move to another town (20M steps after the move)",
+                 x=0.01, y=0.99, ha="left", fontsize=12, color=P.INK)
+    fig.legend(handles, labels, loc="upper left", bbox_to_anchor=(0.01, 0.94), frameon=False,
+               ncol=2, fontsize=9, labelcolor=P.INK2)
+    fig.tight_layout(rect=(0, 0, 1, 0.84))
+    fig.savefig(out, facecolor=P.SURFACE)
+    plt.close(fig)
+
+
+def report(out_root, out, moves=None):
+    rows = summarise(out_root, moves)
+    groups, per_move = report_tables(rows)
+    report_chart(rows, out)
+    text = (f"Per 1,000 game steps: cleaning per player, apples for all 7 together. Before:"
+            f" the last {LATE:.0%} of the runs the players came from; just after: the "
+            f"first {EARLY:.0%} of the steps after the move; at the end: the last {LATE:.0%}.\n\n"
+            f"{groups}\n\n{per_move}\n")
+    with open(os.path.splitext(out)[0] + ".md", "w") as f:
+        f.write(text)
+    print(groups)
+    print("wrote", out)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -232,15 +448,20 @@ def main(argv=None):
     t.add_argument("--batch", type=int, default=8, help="runs per process (they share the GPU)")
     t.add_argument("--ckpt-minutes", type=float, default=10.0)
     t.add_argument("--dry-run", action="store_true", help="print the commands only")
-    for p in (m, t):
+    r = sub.add_parser("report", help="chart + tables of what the newcomers and locals did")
+    r.add_argument("--out", required=True, help="PNG path; a .md of tables is written beside it")
+    for p in (m, t, r):
         p.add_argument("--out-root", default=os.path.join("out", "jaxtown", "newcomers"))
+    for p in (m, t):
         p.add_argument("--steps", type=float, default=STEPS, help="steps after the move")
     args = ap.parse_args(argv)
     if args.cmd == "make":
         make(args.sources, args.out_root, steps=args.steps)
-    else:
+    elif args.cmd == "train":
         train(args.out_root, args.steps, args.batch, ckpt_minutes=args.ckpt_minutes,
               dry_run=args.dry_run)
+    else:
+        report(args.out_root, args.out)
 
 
 if __name__ == "__main__":
