@@ -122,14 +122,17 @@ def updates(path):
 
 def test_a_taken_machine_is_replaced_and_its_runs_carry_on_from_the_bucket(tmp_path):
     bucket = str(tmp_path / "bucket" / "runs")
-    fake = FakeTPUs(str(tmp_path / "cloud"), bucket, victim="t-0", preempt_at=11,
+    fake = FakeTPUs(str(tmp_path / "cloud"), bucket, victim="t-0", preempt_at=13,
                     leftover=["t-1"])
     runs = ["neighbours:selfish", "neighbours:fair", "strangers:selfish"]
     r, local = make_runner(tmp_path, fake, runs, 14, machines=2)
-    # Games last 1,100+ frames (8.6 updates), so by update 11, when the machine is taken
-    # back, its runs have finished games; the new machine's resume trims its game log
-    # back to the checkpoint, and the copies here must follow. One run already trained 2
-    # updates here (as on the GPU): it goes up and carries on.
+    # Games last 1,100+ frames (8.6 updates). The machine is taken back once one of its
+    # runs has update 13 in the bucket; its other run trains alongside, 2 updates behind,
+    # so it has reached 11 by then and its first games (update 9) are in the bucket with
+    # updates to spare. (At 11, a copy still on its way could miss them, and the test
+    # failed now and then.) The new machine's resume trims its game log back to the
+    # checkpoint, and the copies here must follow. One run already trained 2 updates here
+    # (as on the GPU): it goes up and carries on.
     train_here(local, runs[:1], 2)
     here_first = open(os.path.join(local, "neighbours_selfish_s0", "metrics.csv")).read()
     done = r.run()
