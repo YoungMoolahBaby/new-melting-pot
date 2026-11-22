@@ -103,9 +103,9 @@ wsl -d Ubuntu-24.04 -e bash -lc 'cd /mnt/c/dev/new-melting-pot && ~/venvs/meltin
 
 Ctrl-C saves checkpoints; `--resume` carries on (it refuses if the settings changed, and a new run
 refuses a folder that already holds one). Tests: `~/venvs/meltingpot/bin/python -m pytest
-sims/town/tests -q` (18 tests, about 2.5 minutes; the JAX version's 51 are in
+sims/town/tests -q` (18 tests, about 2.5 minutes; the JAX version's 56 are in
 `sims/jaxtown/tests`, about half an hour on the CPU, most of it the Colab and Cloud runners'
-drills; `pytest sims` runs all 69). The players only see their own view, shrunk to
+drills; `pytest sims` runs all 74). The players only see their own view, shrunk to
 22×22 (2×2 pixels per map cell), and whether their zap beam is ready. They don't get Clean Up's
 `NUM_OTHERS_WHO_CLEANED_THIS_STEP` count, so the only way to know who cleaned is to see it.
 
@@ -479,3 +479,21 @@ Up: punishing others "does not directly increase the attractiveness of waste cle
 - **The results** are in [experiments/02-coop.md](experiments/02-coop.md) (20 runs of 20M steps
   with `--river hughes`, against experiment 1's towns; `sims/jaxtown/coop_report.py` makes its
   chart and tables).
+
+### Newcomers in a co-op town (2026-11-21)
+
+Three of a town's seven players move between a connected selfish town with the 10% co-op (seeds 0
+and 1) and one without it (seeds 2 and 3), and everyone trains on for 20M steps. Each move runs
+twice: once with the three who cleaned least, once with the three who cleaned most (in a co-op
+town, its two cleaners and the next player). 16 runs.
+
+- **The code:** `sims/jaxtown/coop_newcomers.py` (`make`, `train`, `report`), built on
+  experiment 1's `newcomers.py`. Players are ranked by how much they cleaned in their run's last
+  10% of games before the move, and each newcomer takes the seat of the local with the same rank.
+- **A newcomer in another seat:** players tell each other apart by seat (one view channel per
+  seat). A newcomer who moved seats would see someone in the channel of its old seat, which it
+  never saw on anyone else. So its first layer is relabelled for the new seat (`reseat`): it sees
+  the players around it as it saw the ones at home. That's exact: a test checks the relabelled
+  network gives the same odds for each move and the same value on the relabelled view, and acts
+  differently without it. Experiment 1's moves kept their seats, so they don't change.
+- **Training:** two batches of eight runs on the 4070 Ti, about 3½ hours in all.

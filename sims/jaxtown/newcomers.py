@@ -118,11 +118,13 @@ def load(run_dir):
     return state, config
 
 
-def swap_in(host_tree, newcomer_tree, slots=NEWCOMER_SLOTS):
-    """The host's weights (or optimizer state) with `slots` taken from the newcomers' run.
-    Every leaf has the player axis first (ppo.Learner vmaps over players)."""
+def swap_in(host_tree, newcomer_tree, slots=NEWCOMER_SLOTS, origin_slots=None):
+    """The host's weights (or optimizer state) with `slots` taken from the newcomers' run:
+    host slot slots[k] gets the newcomers' run's player origin_slots[k] (default: the same
+    slots). Every leaf has the player axis first (ppo.Learner vmaps over players)."""
     import jax
     idx = list(slots)
+    src = list(slots if origin_slots is None else origin_slots)
 
     def put(h, o):
         h, o = np.asarray(h), np.asarray(o)
@@ -130,9 +132,55 @@ def swap_in(host_tree, newcomer_tree, slots=NEWCOMER_SLOTS):
             raise ValueError(f"can't swap players between leaves {h.shape} {h.dtype} and "
                              f"{o.shape} {o.dtype}")
         x = h.copy()
-        x[idx] = o[idx]
+        x[idx] = o[src]
         return x
     return jax.tree_util.tree_map(put, host_tree, newcomer_tree)
+
+
+def seat_map(slots, origin_slots, players=7):
+    """For newcomers seated in host `slots` who sat in `origin_slots` at home: for each host
+    seat, the home seat whose player its occupant stands in for. Each newcomer maps to its
+    own home seat; the locals' seats map to the home seats left over, in order."""
+    slots, origin_slots = list(slots), list(origin_slots)
+    if sorted(set(slots)) != sorted(slots) or sorted(set(origin_slots)) != sorted(origin_slots) \
+            or len(slots) != len(origin_slots):
+        raise ValueError(f"bad seats {slots} <- {origin_slots}")
+    seats = [None] * players
+    for h, o in zip(slots, origin_slots):
+        seats[h] = o
+    rest = iter(s for s in range(players) if s not in origin_slots)
+    return [s if s is not None else next(rest) for s in seats]
+
+
+def reseat(tree, slots, origin_slots):
+    """Weights (or Adam moments) with the newcomers in `slots` relabelled for their new seats.
+    Players tell each other apart by seat (cleanup's player0-6 channels, which a player never
+    sees on itself). A newcomer moved to a different seat would see someone in its old seat's
+    channel, which it never saw on anyone else, and so has untrained weights for. Its first
+    layer (a 1x1 conv, one weight row per input channel) is permuted instead: it sees the host
+    player in seat h as it saw the home player in seat seat_map(...)[h]. That's exact: the same
+    network on relabelled views. Fellow newcomers look as they did at home; locals look like
+    the home players who stayed behind. Same seats: nothing changes."""
+    import jax
+    import cleanup
+    perm = seat_map(slots, origin_slots)
+    if perm == list(range(len(perm))):
+        return tree
+    first = cleanup.CH["player0"]
+    ids = np.arange(first, first + len(perm))
+
+    def put(path, x):
+        keys = [getattr(k, "key", None) for k in path]
+        if keys[-2:] != ["conv1", "kernel"]:
+            return x
+        x = np.asarray(x).copy()
+        if x.ndim != 5 or x.shape[0] != len(perm) or x.shape[3] != cleanup.NUM_CHANNELS:
+            raise ValueError(f"unexpected first layer {x.shape}")
+        for s in slots:
+            k = x[s]                                  # [1, 1, channels, out], a view
+            k[:, :, ids, :] = k[:, :, ids[perm], :]   # seat h's row <- home seat perm[h]'s
+        return x
+    return jax.tree_util.tree_map_with_path(put, tree)
 
 
 def make_folder(move, sources, out_root, steps=STEPS):
@@ -142,24 +190,38 @@ def make_folder(move, sources, out_root, steps=STEPS):
     if os.path.exists(out):
         return out, False
     host_dir, origin_dir = find_run(sources, move.host_run), find_run(sources, move.origin_run)
+    info = {"host": move.host, "origin": move.origin, "seed": move.seed,
+            "origin_seed": move.origin_seed, "control": move.control,
+            "newcomer_slots": list(NEWCOMER_SLOTS)}
+    write_folder(out, host_dir, origin_dir, info, out_root, steps)
+    return out, True
+
+
+def write_folder(out, host_dir, origin_dir, info, out_root, steps=STEPS, slots=NEWCOMER_SLOTS,
+                 origin_slots=None):
+    """Write the run folder `out` (ckpt.pkl + config.json): the host run's checkpoint with
+    the newcomers' run's players origin_slots (default: the same seats) in seats `slots`,
+    relabelled for their new seats (reseat). `info` goes into config.json's "newcomers"."""
+    name = os.path.basename(out)
+    origin_slots = list(slots if origin_slots is None else origin_slots)
     (host, cfg_h), (origin, cfg_o) = load(host_dir), load(origin_dir)
     for k in ("players", "alpha", "beta", "env_steps"):
         if host[k] != origin[k]:
-            raise SystemExit(f"{move.name}: host and newcomers differ in {k} "
+            raise SystemExit(f"{name}: host and newcomers differ in {k} "
                              f"({host[k]} vs {origin[k]})")
     diff = {k: (cfg_h.get(k), cfg_o.get(k)) for k in KEEP + ("dirt",)
             if cfg_h.get(k) != cfg_o.get(k)}
     if diff:
-        raise SystemExit(f"{move.name}: host and newcomers trained differently: {diff}")
-    state = {"params": swap_in(host["params"], origin["params"]),
-             "opt": swap_in(host["opt"], origin["opt"]), "key": host["key"],
+        raise SystemExit(f"{name}: host and newcomers trained differently: {diff}")
+
+    def move_in(h, o):
+        return reseat(swap_in(h, o, slots, origin_slots), slots, origin_slots)
+    state = {"params": move_in(host["params"], origin["params"]),
+             "opt": move_in(host["opt"], origin["opt"]), "key": host["key"],
              "env_steps": 0, "update": 0, "town": host["town"], "players": host["players"],
              "alpha": host["alpha"], "beta": host["beta"]}
     config = {**cfg_h, "steps": steps, "out": None, "out_root": out_root, "resume": True,
-              "newcomers": {"host_run": host_dir, "newcomers_run": origin_dir,
-                            "host": move.host, "origin": move.origin, "seed": move.seed,
-                            "origin_seed": move.origin_seed, "control": move.control,
-                            "newcomer_slots": list(NEWCOMER_SLOTS),
+              "newcomers": {"host_run": host_dir, "newcomers_run": origin_dir, **info,
                             "steps_before": host["env_steps"],
                             "updates_before": host["update"]}}
     part = out + ".part"
@@ -171,7 +233,7 @@ def make_folder(move, sources, out_root, steps=STEPS):
     with open(os.path.join(part, "config.json"), "w") as f:
         json.dump(config, f, indent=2)
     os.replace(part, out)        # the folder appears whole or not at all
-    return out, True
+    return out
 
 
 def make(sources, out_root, moves=None, steps=STEPS, log=print):
