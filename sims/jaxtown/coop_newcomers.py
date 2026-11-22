@@ -12,11 +12,11 @@ the co-op, seeds 0 and 1 (out/jaxtown/coop_pilot); without it, seeds 2 and 3
     control, co-op       co-op s0 <- co-op s1, co-op s1 <- co-op s0
     control, no co-op    none s2 <- none s3, none s3 <- none s2
 
-In a co-op town two players do all the cleaning, so who moves matters. Each move runs twice:
+In a co-op town one player does all the cleaning, so who moves matters. Each move runs twice:
     eaters      the 3 players who cleaned least move, into the seats of the host's 3 who
                 cleaned least (the cleaners stay on both sides);
-    cleaners    the 2 who cleaned most and the third, into the seats of the host's 2 who
-                cleaned most and its third.
+    cleaners    the 3 who cleaned most move, into the seats of the host's 3 who cleaned most
+                (from or into a co-op town: its one cleaner and two of its eaters).
 "Cleaned most" is over each run's last 10% of games before the move; players are paired by
 rank (the top cleaner takes the top cleaner's seat). A newcomer can land in another seat than
 it had at home, so its view is relabelled for its new seat (newcomers.reseat): exact, and it

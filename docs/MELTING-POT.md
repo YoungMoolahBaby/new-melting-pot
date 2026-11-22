@@ -485,7 +485,8 @@ Up: punishing others "does not directly increase the attractiveness of waste cle
 Three of a town's seven players move between a connected selfish town with the 10% co-op (seeds 0
 and 1) and one without it (seeds 2 and 3), and everyone trains on for 20M steps. Each move runs
 twice: once with the three who cleaned least, once with the three who cleaned most (in a co-op
-town, its two cleaners and the next player). 16 runs.
+town, its one cleaner and two of its eaters). 16 runs. The results are in
+[experiments/02b-coop-newcomers.md](experiments/02b-coop-newcomers.md).
 
 - **The code:** `sims/jaxtown/coop_newcomers.py` (`make`, `train`, `report`), built on
   experiment 1's `newcomers.py`. Players are ranked by how much they cleaned in their run's last

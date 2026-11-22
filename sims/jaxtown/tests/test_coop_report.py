@@ -38,9 +38,19 @@ def test_measures_find_runs_and_take_off(tmp_path):
     assert m["apples"] == pytest.approx(50)            # per 1,000 steps, all 7
     assert m["clean"] == pytest.approx(50 / 7)
     assert m["moved"] == pytest.approx(2)              # what the paid players gained
+    assert m["cleaners"] == 2
     assert m["cleaners_got"] == pytest.approx(1) and m["cleaners_ate"] == 0
     assert m["others_got"] == pytest.approx(9.6) and m["others_ate"] == pytest.approx(10)
     assert cr.measure([]) is None
+
+    # One player does all the cleaning and another cleans a little (under a tenth of it): one
+    # cleaner, not averaged with an eater.
+    one = game(19e6, [0, 10, 10, 10, 10, 10, 10], [95, 5, 0, 0, 0, 0, 0],
+               [2, 9.6, 9.6, 9.6, 9.6, 9.6, 9.6])
+    m = cr.measure([one])
+    assert m["cleaners"] == 1
+    assert (m["cleaners_got"], m["cleaners_ate"]) == (pytest.approx(2), 0)
+    assert (m["others_got"], m["others_ate"]) == (pytest.approx(9.6), pytest.approx(10))
 
     # A run without the co-op from before it existed (no coop_share) is share 0; games past
     # 20M steps are left out; the town "takes off" in the first 1M stretch at 1,000+ apples.

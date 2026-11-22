@@ -1,9 +1,10 @@
 # Plan
 
-**Status (2026-11-21):** experiment 1 (four towns and their newcomers in Clean Up) has had its
+**Status (2026-11-22):** experiment 1 (four towns and their newcomers in Clean Up) has had its
 first round; the write-up is [experiments/01-newcomers.md](experiments/01-newcomers.md). So has
 experiment 2, a connecting AI that pays the cleaners
-([experiments/02-coop.md](experiments/02-coop.md)). The code and checks are in
+([experiments/02-coop.md](experiments/02-coop.md)), and its part 2, newcomers in a co-op town
+([experiments/02b-coop-newcomers.md](experiments/02b-coop-newcomers.md)). The code and checks are in
 [MELTING-POT.md](MELTING-POT.md). This page is the thinking behind them.
 
 ## The idea

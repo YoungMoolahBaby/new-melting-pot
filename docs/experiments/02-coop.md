@@ -5,7 +5,13 @@ connecting AI takes a small share of every apple eaten and pays it to whoever cl
 lately. We tried shares from 2% to 100% of each apple, then checked the 10% share on new seeds,
 with fair-minded players, and in a town with no badge. This page is the write-up. The rule's code
 and checks are in [MELTING-POT.md](../MELTING-POT.md#the-co-op-2026-11-21), and experiment 1 is
-in [01-newcomers.md](01-newcomers.md).
+in [01-newcomers.md](01-newcomers.md). Part 2, players moving into and out of a co-op town, is in
+[02b-coop-newcomers.md](02b-coop-newcomers.md).
+
+**Corrected 2026-11-22.** The first version said two players did all the cleaning and still ate.
+It was one player, who ate nothing. We had averaged each game's two top cleaners, which put the
+one cleaner together with an eater. The parts about who does the work are fixed below; the
+apples, the payouts and the take-off times were right and haven't changed.
 
 ## In short
 
@@ -15,15 +21,16 @@ in [01-newcomers.md](01-newcomers.md).
   experiment 1 ate 94, after 100M steps.
 - **5% was enough; 2% wasn't, yet.** 5% got there too, a few million steps later than 10%. 2%
   looked just like no co-op after 20M steps.
-- **More isn't better.** 25% and 50% ate less than 10%. 50% got going fastest, but its
-  cleaners stopped eating. At 100% an apple paid its eater nothing unless they'd cleaned, so the
-  town ate about a quarter as much.
+- **More isn't better.** 25% and 50% ate less than 10%. 50% got going fastest, but more of its
+  players cleaned and fewer ate. At 100% an apple paid its eater nothing unless they'd cleaned,
+  so the town ate about a quarter as much.
 - **It held everywhere we tried it.** At 10%: on two new seeds (about 2,100 against 29 without),
   with fair-minded players (about 2,500 against 17), and in the neighbours town (about 2,150
   against 21). That town has no badge, so the payment works without anyone seeing who cleaned.
-- **Two players became the town's cleaners.** At 5% and 10%, in every town that took off, two
-  players did all the cleaning in nearly every game and still ate. At 10% each of them earned about 300 per 1,000
-  steps and each of the other five about 360; without the co-op, everyone earned about 6.
+- **One player became the town's cleaner.** At 5% and 10%, in every town that took off, one
+  player did all the cleaning, in every game, and ate nothing. They lived off the pot: about 240
+  per 1,000 steps at 10% (about 110 at 5%), against about 360 for each of the six who ate.
+  Without the co-op, everyone earned about 6.
 - **How sure:** two seeds per setting (four at 10%), 20M steps, one game, our learner. The jump is
   far bigger than any gap between seeds; the order of the shares from 5% to 50% is not firm.
 
@@ -72,7 +79,7 @@ and 3, we trained the town without the co-op as well.
 - apples eaten by all seven together;
 - dirt cleaned per player;
 - the reward the co-op paid out (what the players it paid gained);
-- how much of each game's cleaning its two top cleaners did;
+- how many players did the cleaning (each at least a tenth of the town's);
 - when the town first ate 1,000 apples per 1,000 steps, in a stretch of 1M steps.
 
 ## How big a share
@@ -81,15 +88,15 @@ and 3, we trained the town without the co-op as well.
 
 Lines are the mean of the seeds; the band runs from one seed to the other.
 
-| Co-op share | Apples per 1,000 steps (all 7; seeds) | Dirt cleaned per player | Paid out by the co-op | Two top cleaners' share of cleaning | First reached 1,000 apples (seeds) |
+| Co-op share | Apples per 1,000 steps (all 7; seeds) | Dirt cleaned per player | Paid out by the co-op | Players who did the cleaning (seeds) | First reached 1,000 apples (seeds) |
 |---|---|---|---|---|---|
-| none | 43 (29-56) | 47 | 0 | 0.66 | not by 20M, not by 20M |
-| 2% | 43 (42-43) | 45 | 1 | 0.62 | not by 20M, not by 20M |
-| 5% | 2,250 (2,181-2,320) | 72 | 112 | 1.00 | 15M, 11M |
-| 10% | 2,399 (2,396-2,401) | 72 | 239 | 1.00 | 9M, 11M |
-| 25% | 1,858 (1,721-1,996) | 71 | 431 | 0.98 | 9M, 12M |
-| 50% | 1,930 (1,897-1,963) | 72 | 832 | 0.65 | 7M, 6M |
-| 100% | 647 (641-654) | 73 | 555 | 0.37 | not by 20M, not by 20M |
+| none | 43 (29-56) | 47 | 0 | 5, 3 | not by 20M, not by 20M |
+| 2% | 43 (42-43) | 45 | 1 | 6, 6 | not by 20M, not by 20M |
+| 5% | 2,250 (2,181-2,320) | 72 | 112 | 1, 1 | 15M, 11M |
+| 10% | 2,399 (2,396-2,401) | 72 | 239 | 1, 1 | 9M, 11M |
+| 25% | 1,858 (1,721-1,996) | 71 | 431 | 2, 2 | 9M, 12M |
+| 50% | 1,930 (1,897-1,963) | 72 | 832 | 4, 3 | 7M, 6M |
+| 100% | 647 (641-654) | 73 | 555 | 6, 6 | not by 20M, not by 20M |
 
 The connected town, selfish players, seeds 0 and 1. For scale: a river that never gets dirty
 gives about 2,300 apples per 1,000 steps. Players who share all their apples (the neighbours
@@ -105,11 +112,12 @@ after 100M steps
   little to teach anyone to clean. 5% took off later than 10% (11M and 15M, against 9M and 11M).
   So 2% might still take off in a longer run; we don't know.
 - **50% got going fastest, but 10% ended highest.** At 50% the town ate more from the first 2M
-  steps. By the end its cleaners ate almost nothing, living off the pot, and the town ate a
-  little less than at 10%.
+  steps. By the end three or four of its players cleaned and ate little (about 40 apples each
+  per 1,000 steps), living off the pot, and the town ate a little less than at 10%.
 - **At 100%, eating stops paying.** An eater gives the whole apple away and gets a share back only
-  if they cleaned recently. So every player cleans (the top two did only 37% of it), nobody gains
-  much from eating, and the town ate about a quarter as much as at 10%.
+  if they cleaned recently. Six of the seven cleaned, about equally, and ate nothing; the seventh
+  ate every apple and cleaned a little. All seven earned the same, about 92 per 1,000 steps, and
+  the town ate about a quarter as much as at 10%.
 
 ## Does it hold up?
 
@@ -133,30 +141,34 @@ after 100M steps
 
 ## Who does the work, who earns
 
-| Setting | Co-op share | Two top cleaners: reward, apples eaten | Other five: reward, apples eaten |
-|---|---|---|---|
-| connected town, selfish | none | 5, 5 | 6, 6 |
-| connected town, selfish | 2% | 6, 6 | 6, 6 |
-| connected town, selfish | 5% | 236, 189 | 356, 375 |
-| connected town, selfish | 10% | 297, 197 | 361, 401 |
-| connected town, selfish | 25% | 255, 39 | 270, 356 |
-| connected town, selfish | 50% | 284, 2 | 272, 385 |
-| connected town, selfish | 100% | 94, 0 | 92, 129 |
-| connected town, selfish, new seeds 2-3 | 10% | 267, 178 | 320, 356 |
-| connected town, fair-minded | 10% | 313, 207 | 382, 424 |
-| neighbours town (no badge), selfish | 10% | 267, 177 | 324, 359 |
+| Setting | Co-op share | Players who did the cleaning (seeds) | Each of them: reward, apples eaten | Each of the others: reward, apples eaten |
+|---|---|---|---|---|
+| connected town, selfish | none | 5, 3 | 5, 5 | 7, 7 |
+| connected town, selfish | 2% | 6, 6 | 6, 6 | 7, 7 |
+| connected town, selfish | 5% | 1, 1 | 112, 0 | 356, 375 |
+| connected town, selfish | 10% | 1, 1 | 239, 0 | 360, 400 |
+| connected town, selfish | 25% | 2, 2 | 255, 39 | 270, 356 |
+| connected town, selfish | 50% | 4, 3 | 287, 43 | 265, 507 |
+| connected town, selfish | 100% | 6, 6 | 92, 0 | 92, 647 |
+| connected town, selfish, new seeds 2-3 | 10% | 1, 1 | 212, 0 | 320, 356 |
+| connected town, fair-minded | 10% | 1, 1 | 251, 0 | 381, 423 |
+| neighbours town (no badge), selfish | 10% | 1, 1 | 213, 0 | 323, 358 |
 
-Per player, per 1,000 steps, 18M-20M steps. In each game we take its two top cleaners and
-compare them with the other five.
+Per player, per 1,000 steps, 18M-20M steps. A player counts as one who did the cleaning if they
+did at least a tenth of the town's cleaning over those steps.
 
-- **The town split into cleaners and eaters.** At 5% and 10%, two players did all the cleaning
-  in nearly every game, and still ate about half as much as the others. Players who share all
-  their apples split the work too: three cleaners who ate almost nothing.
-- **At small shares, the cleaners earn a bit less.** At 10% they made about 300 per 1,000 steps
-  and the others about 360. Without the co-op, everyone made about 6, so the cleaners were still
-  about 50 times as well off.
-- **At 25% and above, cleaning becomes a job.** The cleaners mostly stopped eating and lived off
-  the pot. At 50% they earned about what the eaters did (284 and 272).
+- **The town split into one cleaner and six eaters.** At 5% and 10%, in every town that took
+  off, one player did all the cleaning, in every game, and ate nothing. The other six cleaned
+  next to nothing. Players who share all their apples split the work too: after 100M steps,
+  three of them did nearly all the cleaning and ate almost nothing
+  ([MELTING-POT.md](../MELTING-POT.md#why-the-players-stop-learning-2026-11-18-to-11-19)).
+- **At small shares, the cleaner earns least.** The cleaner's pay is the whole pot. At 10% that
+  was 200-251 per 1,000 steps across the eight runs, against about 320-380 for each of the
+  others. At 5% it was about 110, under a third of what the others earned. Without the co-op,
+  everyone made about 6, so at 10% the cleaner was still about 40 times as well off.
+- **Bigger shares, more cleaners, more even pay.** At 25%, two players cleaned and ate little,
+  and earned a little less than the others (255 and 270). At 50%, three or four cleaned and
+  earned a little more (287 and 265). At 100%, six cleaned and all seven earned the same.
 
 ## How sure we are
 
@@ -183,15 +195,15 @@ compare them with the other five.
 - **Seeing who did the work didn't matter; paying them did.** Real cases to look at: whether
   thanks, ratings and badges for volunteer upkeep hold up without pay, and what changes when it
   is paid.
-- **The work became a job for a few.** Real cases to look at: who ends up doing upkeep work that
-  everyone benefits from, and whether they're paid less than the people who benefit.
+- **The work became one player's job, and at small shares the worst-paid one.** Real cases to
+  look at: who ends up doing upkeep work that everyone benefits from, and whether they're paid
+  less than the people who benefit.
 - **Too big a cut backfires.** When the pot took the whole apple, eating stopped paying and the
   town ate less. Real cases to look at: levies so high that the activity they fund shrinks.
 
 ## What's next (ideas, not decided)
 
-- **Newcomers in a co-op town** (next): do newcomers take up cleaning, and do selfish newcomers
-  from a town without the co-op break it?
+- **Newcomers in a co-op town:** done, in [02b-coop-newcomers.md](02b-coop-newcomers.md).
 - **Longer runs:** does 2% take off later, and do the co-op towns hold for 100M steps?
 - **The AI raising its cut:** a co-op that starts at 10% and keeps more for itself over time is
   enshittification in miniature. When does the town stop cleaning?
@@ -222,34 +234,34 @@ cd /mnt/c/dev/new-melting-pot
 <details>
 <summary>Every run (18M-20M steps, per 1,000 steps)</summary>
 
-| Town | Players | Co-op share | Seed | Apples (all 7) | Dirt cleaned per player | Paid out by the co-op | Two top cleaners' share | First reached 1,000 apples | Games |
+| Town | Players | Co-op share | Seed | Apples (all 7) | Dirt cleaned per player | Paid out by the co-op | Players who did the cleaning | First reached 1,000 apples | Games |
 |---|---|---|---|---|---|---|---|---|---|
-| connected | fair | none | 0 | 27 | 51 | 0 | 0.55 | not by 20M | 1356 |
-| connected | fair | none | 1 | 6 | 24 | 0 | 0.63 | not by 20M | 1313 |
-| connected | fair | 10% | 0 | 2,543 | 72 | 251 | 1.00 | 9M | 1385 |
-| connected | fair | 10% | 1 | 2,527 | 72 | 250 | 1.00 | 8M | 1392 |
-| connected | selfish | none | 0 | 29 | 44 | 0 | 0.63 | not by 20M | 1356 |
-| connected | selfish | none | 1 | 56 | 50 | 0 | 0.70 | not by 20M | 1313 |
-| connected | selfish | none | 2 | 38 | 39 | 0 | 0.63 | not by 20M | 1347 |
-| connected | selfish | none | 3 | 20 | 42 | 0 | 0.72 | not by 20M | 1369 |
-| connected | selfish | 2% | 0 | 43 | 47 | 1 | 0.60 | not by 20M | 1385 |
-| connected | selfish | 2% | 1 | 42 | 43 | 1 | 0.65 | not by 20M | 1392 |
-| connected | selfish | 5% | 0 | 2,181 | 72 | 108 | 1.00 | 15M | 1385 |
-| connected | selfish | 5% | 1 | 2,320 | 72 | 116 | 1.00 | 11M | 1392 |
-| connected | selfish | 10% | 0 | 2,401 | 72 | 239 | 1.00 | 9M | 1385 |
-| connected | selfish | 10% | 1 | 2,396 | 72 | 239 | 1.00 | 11M | 1392 |
-| connected | selfish | 10% | 2 | 2,251 | 72 | 224 | 1.00 | 12M | 1347 |
-| connected | selfish | 10% | 3 | 2,016 | 72 | 200 | 1.00 | 9M | 1369 |
-| connected | selfish | 25% | 0 | 1,996 | 72 | 496 | 1.00 | 9M | 1385 |
-| connected | selfish | 25% | 1 | 1,721 | 71 | 367 | 0.97 | 12M | 1392 |
-| connected | selfish | 50% | 0 | 1,963 | 72 | 805 | 0.64 | 7M | 1385 |
-| connected | selfish | 50% | 1 | 1,897 | 72 | 859 | 0.66 | 6M | 1392 |
-| connected | selfish | 100% | 0 | 641 | 73 | 550 | 0.36 | not by 20M | 1385 |
-| connected | selfish | 100% | 1 | 654 | 73 | 560 | 0.37 | not by 20M | 1392 |
-| neighbours | selfish | none | 0 | 14 | 37 | 0 | 0.64 | not by 20M | 1356 |
-| neighbours | selfish | none | 1 | 27 | 39 | 0 | 0.78 | not by 20M | 1313 |
-| neighbours | selfish | 10% | 0 | 2,092 | 72 | 207 | 1.00 | 10M | 1385 |
-| neighbours | selfish | 10% | 1 | 2,209 | 72 | 219 | 1.00 | 11M | 1392 |
+| connected | fair | none | 0 | 27 | 51 | 0 | 5 | not by 20M | 1356 |
+| connected | fair | none | 1 | 6 | 24 | 0 | 4 | not by 20M | 1313 |
+| connected | fair | 10% | 0 | 2,543 | 72 | 251 | 1 | 9M | 1385 |
+| connected | fair | 10% | 1 | 2,527 | 72 | 250 | 1 | 8M | 1392 |
+| connected | selfish | none | 0 | 29 | 44 | 0 | 5 | not by 20M | 1356 |
+| connected | selfish | none | 1 | 56 | 50 | 0 | 3 | not by 20M | 1313 |
+| connected | selfish | none | 2 | 38 | 39 | 0 | 6 | not by 20M | 1347 |
+| connected | selfish | none | 3 | 20 | 42 | 0 | 4 | not by 20M | 1369 |
+| connected | selfish | 2% | 0 | 43 | 47 | 1 | 6 | not by 20M | 1385 |
+| connected | selfish | 2% | 1 | 42 | 43 | 1 | 6 | not by 20M | 1392 |
+| connected | selfish | 5% | 0 | 2,181 | 72 | 108 | 1 | 15M | 1385 |
+| connected | selfish | 5% | 1 | 2,320 | 72 | 116 | 1 | 11M | 1392 |
+| connected | selfish | 10% | 0 | 2,401 | 72 | 239 | 1 | 9M | 1385 |
+| connected | selfish | 10% | 1 | 2,396 | 72 | 239 | 1 | 11M | 1392 |
+| connected | selfish | 10% | 2 | 2,251 | 72 | 224 | 1 | 12M | 1347 |
+| connected | selfish | 10% | 3 | 2,016 | 72 | 200 | 1 | 9M | 1369 |
+| connected | selfish | 25% | 0 | 1,996 | 72 | 496 | 2 | 9M | 1385 |
+| connected | selfish | 25% | 1 | 1,721 | 71 | 367 | 2 | 12M | 1392 |
+| connected | selfish | 50% | 0 | 1,963 | 72 | 805 | 4 | 7M | 1385 |
+| connected | selfish | 50% | 1 | 1,897 | 72 | 859 | 3 | 6M | 1392 |
+| connected | selfish | 100% | 0 | 641 | 73 | 550 | 6 | not by 20M | 1385 |
+| connected | selfish | 100% | 1 | 654 | 73 | 560 | 6 | not by 20M | 1392 |
+| neighbours | selfish | none | 0 | 14 | 37 | 0 | 4 | not by 20M | 1356 |
+| neighbours | selfish | none | 1 | 27 | 39 | 0 | 3 | not by 20M | 1313 |
+| neighbours | selfish | 10% | 0 | 2,092 | 72 | 207 | 1 | 10M | 1385 |
+| neighbours | selfish | 10% | 1 | 2,209 | 72 | 219 | 1 | 11M | 1392 |
 
 Without the co-op, seed 0 is from `out/jaxtown/towns` and seed 1 from `out/colab/towns`
 (experiment 1's runs, cut at 20M; seed 1's first 13.5M steps ran on a Colab TPU). Seeds 2 and 3

@@ -8,9 +8,9 @@ Finds every JAX run in the --runs folders (a folder holding config.json and epis
 that started from the hughes river under Melting Pot's dirt rule, keys it by town, players,
 co-op share and seed, and looks at its first 20M steps (runs without the co-op that went on to
 100M are cut at 20M). Per 1,000 game steps: apples eaten by all 7,
-dirt cleaned per player, the reward the co-op moved (what the players it paid gained), the two
-top cleaners' share of a game's cleaning, and what the two top cleaners and the other five
-each earned and ate. Prints the tables (markdown) and saves them next to the chart as <out>.md.
+dirt cleaned per player, the reward the co-op moved (what the players it paid gained), how
+many players did the cleaning (at least a tenth of it each), and what they and the others each
+earned and ate. Prints the tables (markdown) and saves them next to the chart as <out>.md.
 """
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ import report as P  # noqa: E402  (the palette and chart style of the other char
 STEPS = 20e6
 END = (18e6, 20e6)          # the last 10% of 20M steps
 TAKE_OFF = 1000             # apples per 1,000 steps: "the town took off"
+CLEANER = 0.1               # a cleaner did at least this share of the town's cleaning
 SHARES = (0.0, 0.02, 0.05, 0.1, 0.25, 0.5, 1.0)
 # The 10% co-op in other settings: (label, town, players, seeds).
 ELSEWHERE = (("connected town, selfish, seeds 0-1", "connected", "selfish", (0, 1)),
@@ -74,17 +75,20 @@ def measure(eps):
            "apples": k * sum(sum(e["ate"]) for e in eps),
            "clean": k * sum(sum(e["cleaned"]) for e in eps) / 7,
            "moved": k * sum(sum(max(r - a - f, 0.0) for r, a, f in
-                                zip(e["return"], e["ate"], e["feed"])) for e in eps),
-           "top2": float(np.nanmean([np.nan if e.get("top2_clean_share") is None
-                                     else e["top2_clean_share"] for e in eps]))}
-    got = {"cleaners_got": 0.0, "cleaners_ate": 0.0, "others_got": 0.0, "others_ate": 0.0}
-    for e in eps:
-        order = np.argsort(e["cleaned"])[::-1]        # the game's two top cleaners first
-        ret, ate = np.asarray(e["return"]), np.asarray(e["ate"])
-        for who, idx in (("cleaners", order[:2]), ("others", order[2:])):
-            got[f"{who}_got"] += ret[idx].sum() / len(idx)
-            got[f"{who}_ate"] += ate[idx].sum() / len(idx)
-    out.update({name: k * v for name, v in got.items()})
+                                zip(e["return"], e["ate"], e["feed"])) for e in eps)}
+    # The town's cleaners: the players who did at least a tenth of its cleaning over these
+    # games. (Not "each game's top two": where one player does all the cleaning, that pairs
+    # the cleaner with an eater.)
+    cleaned = np.sum([e["cleaned"] for e in eps], axis=0)
+    ret = np.sum([e["return"] for e in eps], axis=0)
+    ate = np.sum([e["ate"] for e in eps], axis=0)
+    who = (cleaned >= CLEANER * cleaned.sum() if cleaned.sum() > 0
+           else np.zeros(len(cleaned), bool))
+    out["cleaners"] = int(who.sum())
+    for name, idx in (("cleaners", who), ("others", ~who)):
+        n = idx.sum()
+        out[f"{name}_got"] = k * ret[idx].sum() / n if n else np.nan
+        out[f"{name}_ate"] = k * ate[idx].sum() / n if n else np.nan
     return out
 
 
@@ -134,7 +138,7 @@ def tables(runs):
     lines += ["**How big a share** (connected town, selfish players, seeds 0 and 1; 18M-20M steps)",
               "",
               "| Co-op share | Apples per 1,000 steps (all 7; seeds) | Dirt cleaned per player | "
-              "Paid out by the co-op | Two top cleaners' share of cleaning | First reached "
+              "Paid out by the co-op | Players who did the cleaning (seeds) | First reached "
               f"{TAKE_OFF:,} apples (seeds) |",
               "|---|---|---|---|---|---|"]
     for s in SHARES:
@@ -148,7 +152,7 @@ def tables(runs):
         lines.append(f"| {pct(s)} | {seeds_text([m['apples'] for m in ms])} | "
                      f"{np.mean([m['clean'] for m in ms]):.0f} | "
                      f"{np.mean([m['moved'] for m in ms]):,.0f} | "
-                     f"{np.mean([m['top2'] for m in ms]):.2f} | {off} |")
+                     f"{', '.join(str(m['cleaners']) for m in ms)} | {off} |")
 
     sharing = ("neighbours", "shared", 0.0, 0)
     if sharing in runs:
@@ -172,11 +176,11 @@ def tables(runs):
                      f"{np.mean([m['clean'] for m in without]):.0f}, "
                      f"{np.mean([m['clean'] for m in with_]):.0f} |")
 
-    lines += ["", "**Who earns what** (18M-20M steps; per player, per 1,000 steps; each game's "
-              "two top cleaners against the other five)", "",
-              "| Setting | Co-op share | Two top cleaners: reward, apples eaten | "
-              "Other five: reward, apples eaten |",
-              "|---|---|---|---|"]
+    lines += ["", "**Who earns what** (18M-20M steps; per player, per 1,000 steps; the players "
+              "who did at least a tenth of the cleaning against the others)", "",
+              "| Setting | Co-op share | Players who did the cleaning (seeds) | Each of them: "
+              "reward, apples eaten | Each of the others: reward, apples eaten |",
+              "|---|---|---|---|---|"]
     rows = [("connected town, selfish", "connected", "selfish", s, (0, 1)) for s in SHARES]
     rows += [(label, town, players, 0.1, seeds) for label, town, players, seeds in ELSEWHERE[1:]]
     for label, town, players, s, seeds in rows:
@@ -184,13 +188,13 @@ def tables(runs):
         if not all(ms):
             continue
         avg = {k: np.mean([m[k] for m in ms]) for k in ms[0]}
-        lines.append(f"| {label} | {pct(s)} | {avg['cleaners_got']:.0f}, "
-                     f"{avg['cleaners_ate']:.0f} | {avg['others_got']:.0f}, "
-                     f"{avg['others_ate']:.0f} |")
+        lines.append(f"| {label} | {pct(s)} | {', '.join(str(m['cleaners']) for m in ms)} | "
+                     f"{avg['cleaners_got']:.0f}, {avg['cleaners_ate']:.0f} | "
+                     f"{avg['others_got']:.0f}, {avg['others_ate']:.0f} |")
 
     lines += ["", "**Every run** (18M-20M steps, per 1,000 steps)", "",
               "| Town | Players | Co-op share | Seed | Apples (all 7) | Dirt cleaned per player | "
-              f"Paid out by the co-op | Two top cleaners' share | First reached {TAKE_OFF:,} "
+              f"Paid out by the co-op | Players who did the cleaning | First reached {TAKE_OFF:,} "
               "apples | Games |",
               "|---|---|---|---|---|---|---|---|---|---|"]
     shown = {(t, p) for _, t, p, _ in ELSEWHERE}
@@ -199,7 +203,7 @@ def tables(runs):
         if m is None:
             continue
         lines.append(f"| {k[0]} | {k[1]} | {pct(k[2])} | {k[3]} | {m['apples']:,.0f} | "
-                     f"{m['clean']:.0f} | {m['moved']:,.0f} | {m['top2']:.2f} | "
+                     f"{m['clean']:.0f} | {m['moved']:,.0f} | {m['cleaners']} | "
                      f"{'not by 20M' if off is None else f'{off / 1e6:.0f}M'} | {m['games']} |")
     return "\n".join(lines)
 
