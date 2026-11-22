@@ -196,7 +196,8 @@ There, cleaning earns nothing but the apples it grows, which anyone can eat.
 ## What's next (ideas, not decided)
 
 - **Two cleaners instead of one:** at 25% two players cleaned. Does such a town survive losing
-  one of them?
+  one of them? Planned with the next idea as part 3:
+  [02c-losing-a-cleaner.md](02c-losing-a-cleaner.md).
 - **The cleaner alone:** move only the cleaner, or take it away with nobody in its place.
 - **Longer runs:** does the town that lost its cleaner recover, the way a fresh co-op town takes
   off?

@@ -167,6 +167,8 @@ Its questions, in the order its plan needs them:
 ## Next
 
 - Keep planning: take the questions in [QUESTIONS.md](QUESTIONS.md) one at a time.
+- Experiment 2, part 3 is planned, not run: does a co-op town with two cleaners survive losing
+  one? ([experiments/02c-losing-a-cleaner.md](experiments/02c-losing-a-cleaner.md))
 - Melting Pot runs in WSL2 (2026-11-16, [MELTING-POT.md](MELTING-POT.md)). Experiment 1 is built
   there and in a faster JAX copy of Clean Up, checked against Melting Pot.
 - brownfield's five questions are answered (2026-11-16), each from real cases, in
