@@ -7,17 +7,21 @@ undo **enshittification**: products and places that start out good, lock people 
 squeeze them. The tool is DeepMind's [Melting Pot](https://github.com/google-deepmind/meltingpot),
 a set of small games where AI agents share, team up, or cheat each other.
 
-**Status (2026-11-21): experiment 1's first round is done.** Four towns play Clean Up, a
-game where a shared river must be kept clean for apples to grow: strangers, neighbours, a town
-with an AI that connects people (it shows who has been cleaning), and a town with an AI that
+**Status (2026-11-21): experiments 1 and 2 have had their first rounds.** Four towns play Clean
+Up, a game where a shared river must be kept clean for apples to grow: strangers, neighbours, a
+town with an AI that connects people (it shows who has been cleaning), and a town with an AI that
 isolates them (feed tiles pay a small private reward to whoever stands on them, like an
 engagement feed). Players are selfish or fair-minded. Then some players move to another town.
 It runs in our own fast JAX copy of Clean Up, checked rule by rule against Melting Pot. In
 short: newcomers took on their new town's habits and the locals hardly changed; the isolating
-town's feed drew its players away from the river; the other towns came out alike.
+town's feed drew its players away from the river; the other towns came out alike, and none kept
+its river clean. In experiment 2 the connecting AI acts as a co-op instead: it pays a small share
+of every apple eaten (5-10% was enough) to whoever cleaned lately, and the town eats about 50
+times as much.
 
 - [docs/experiments/01-newcomers.md](docs/experiments/01-newcomers.md): experiment 1, the
   write-up.
+- [docs/experiments/02-coop.md](docs/experiments/02-coop.md): experiment 2, the co-op.
 - [docs/PLAN.md](docs/PLAN.md): the idea, the ground rules, decisions. Start here.
 - [docs/QUESTIONS.md](docs/QUESTIONS.md): every open question, parked until we take it up.
 - [docs/MELTING-POT.md](docs/MELTING-POT.md): Melting Pot, how to run it, and experiment 1's

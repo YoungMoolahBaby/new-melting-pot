@@ -103,9 +103,9 @@ wsl -d Ubuntu-24.04 -e bash -lc 'cd /mnt/c/dev/new-melting-pot && ~/venvs/meltin
 
 Ctrl-C saves checkpoints; `--resume` carries on (it refuses if the settings changed, and a new run
 refuses a folder that already holds one). Tests: `~/venvs/meltingpot/bin/python -m pytest
-sims/town/tests -q` (18 tests, about 2.5 minutes; the JAX version's 50 are in
+sims/town/tests -q` (18 tests, about 2.5 minutes; the JAX version's 51 are in
 `sims/jaxtown/tests`, about half an hour on the CPU, most of it the Colab and Cloud runners'
-drills; `pytest sims` runs all 68). The players only see their own view, shrunk to
+drills; `pytest sims` runs all 69). The players only see their own view, shrunk to
 22×22 (2×2 pixels per map cell), and whether their zap beam is ready. They don't get Clean Up's
 `NUM_OTHERS_WHO_CLEANED_THIS_STEP` count, so the only way to know who cleaned is to see it.
 
@@ -476,5 +476,6 @@ Up: punishing others "does not directly increase the attractiveness of waste cle
   the share belongs to the run, and old runs still resume.
 - **Fair players** compare what they get after the co-op.
 - **Sustainability** (when apples are eaten) counts the game's own rewards, not the payouts.
-- **A first pilot** ran on 2026-11-21 (connected town, selfish players, 2 seeds, shares 10%, 25%,
-  50% and 100%, 20M steps each, `--river hughes`). Its write-up is still to come.
+- **The results** are in [experiments/02-coop.md](experiments/02-coop.md) (20 runs of 20M steps
+  with `--river hughes`, against experiment 1's towns; `sims/jaxtown/coop_report.py` makes its
+  chart and tables).
