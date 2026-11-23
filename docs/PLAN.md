@@ -1,11 +1,13 @@
 # Plan
 
-**Status (2026-11-22):** experiment 1 (four towns and their newcomers in Clean Up) has had its
+**Status (2026-11-23):** experiment 1 (four towns and their newcomers in Clean Up) has had its
 first round; the write-up is [experiments/01-newcomers.md](experiments/01-newcomers.md). So has
 experiment 2, a connecting AI that pays the cleaners
-([experiments/02-coop.md](experiments/02-coop.md)), and its part 2, newcomers in a co-op town
-([experiments/02b-coop-newcomers.md](experiments/02b-coop-newcomers.md)). The code and checks are in
-[MELTING-POT.md](MELTING-POT.md). This page is the thinking behind them.
+([experiments/02-coop.md](experiments/02-coop.md)), its part 2, newcomers in a co-op town
+([experiments/02b-coop-newcomers.md](experiments/02b-coop-newcomers.md)), and its part 3, a co-op
+town losing one cleaner ([experiments/02c-losing-a-cleaner.md](experiments/02c-losing-a-cleaner.md)).
+The code and checks are in [MELTING-POT.md](MELTING-POT.md). This page is the thinking behind
+them.
 
 ## The idea
 
@@ -167,8 +169,10 @@ Its questions, in the order its plan needs them:
 ## Next
 
 - Keep planning: take the questions in [QUESTIONS.md](QUESTIONS.md) one at a time.
-- Experiment 2, part 3 is planned, not run: does a co-op town with two cleaners survive losing
-  one? ([experiments/02c-losing-a-cleaner.md](experiments/02c-losing-a-cleaner.md))
+- Experiment 2, part 3 is done (2026-11-23): a co-op town with two cleaners survives losing one,
+  and one that loses its only cleaner crashes but can come back
+  ([experiments/02c-losing-a-cleaner.md](experiments/02c-losing-a-cleaner.md)). Its "What's next"
+  lists the ideas; none is chosen.
 - Melting Pot runs in WSL2 (2026-11-16, [MELTING-POT.md](MELTING-POT.md)). Experiment 1 is built
   there and in a faster JAX copy of Clean Up, checked against Melting Pot.
 - brownfield's five questions are answered (2026-11-16), each from real cases, in

@@ -103,9 +103,9 @@ wsl -d Ubuntu-24.04 -e bash -lc 'cd /mnt/c/dev/new-melting-pot && ~/venvs/meltin
 
 Ctrl-C saves checkpoints; `--resume` carries on (it refuses if the settings changed, and a new run
 refuses a folder that already holds one). Tests: `~/venvs/meltingpot/bin/python -m pytest
-sims/town/tests -q` (18 tests, about 2.5 minutes; the JAX version's 56 are in
+sims/town/tests -q` (18 tests, about 2.5 minutes; the JAX version's 59 are in
 `sims/jaxtown/tests`, about half an hour on the CPU, most of it the Colab and Cloud runners'
-drills; `pytest sims` runs all 74). The players only see their own view, shrunk to
+drills; `pytest sims` runs all 77). The players only see their own view, shrunk to
 22×22 (2×2 pixels per map cell), and whether their zap beam is ready. They don't get Clean Up's
 `NUM_OTHERS_WHO_CLEANED_THIS_STEP` count, so the only way to know who cleaned is to see it.
 
@@ -498,3 +498,17 @@ town, its one cleaner and two of its eaters). 16 runs. The results are in
   network gives the same odds for each move and the same value on the relabelled view, and acts
   differently without it. Experiment 1's moves kept their seats, so they don't change.
 - **Training:** two batches of eight runs on the 4070 Ti, about 3½ hours in all.
+
+### Losing one cleaner (2026-11-23)
+
+A co-op town's top cleaner leaves and one player from another co-op town with the same share
+takes its seat: at 25%, the other town's least or top cleaner (two runs each); at 10%, the other
+town's least cleaner (four runs). Everyone trains on for 20M steps. The results are in
+[experiments/02c-losing-a-cleaner.md](experiments/02c-losing-a-cleaner.md).
+
+- **The code:** `sims/jaxtown/lose_cleaner.py` (`make`, `train`, `report`), built on part 2's
+  `coop_newcomers.py` (the same ranking by cleaning, the same relabelling for a new seat). Its
+  tests check the plan, that the top cleaner's seat gets the right player's weights while the six
+  locals keep theirs, that the move trains on with the host's co-op, and the report's measures on
+  made-up games.
+- **Training:** one batch of eight runs on the 4070 Ti, 1 hour 41 minutes.

@@ -196,9 +196,12 @@ There, cleaning earns nothing but the apples it grows, which anyone can eat.
 ## What's next (ideas, not decided)
 
 - **Two cleaners instead of one:** at 25% two players cleaned. Does such a town survive losing
-  one of them? Planned with the next idea as part 3:
-  [02c-losing-a-cleaner.md](02c-losing-a-cleaner.md).
-- **The cleaner alone:** move only the cleaner, or take it away with nobody in its place.
+  one of them? Done with the next idea as part 3:
+  [02c-losing-a-cleaner.md](02c-losing-a-cleaner.md). The other cleaner doubled up and the town
+  held. With one cleaner and one co-op eater in its seat, the town crashed, but three of four
+  came back after 9-11M steps.
+- **The cleaner alone:** part 3 moved only the cleaner, with an eater from another co-op town
+  in its seat. Still open: a player from a town without the co-op in its seat, or nobody.
 - **Longer runs:** does the town that lost its cleaner recover, the way a fresh co-op town takes
   off?
 - **The co-op ending in place:** the same town losing its co-op, to set beside the cleaner who

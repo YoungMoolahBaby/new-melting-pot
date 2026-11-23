@@ -6,7 +6,8 @@ lately. We tried shares from 2% to 100% of each apple, then checked the 10% shar
 with fair-minded players, and in a town with no badge. This page is the write-up. The rule's code
 and checks are in [MELTING-POT.md](../MELTING-POT.md#the-co-op-2026-11-21), and experiment 1 is
 in [01-newcomers.md](01-newcomers.md). Part 2, players moving into and out of a co-op town, is in
-[02b-coop-newcomers.md](02b-coop-newcomers.md).
+[02b-coop-newcomers.md](02b-coop-newcomers.md), and part 3, a co-op town losing one cleaner, in
+[02c-losing-a-cleaner.md](02c-losing-a-cleaner.md).
 
 **Corrected 2026-11-22.** The first version said two players did all the cleaning and still ate.
 It was one player, who ate nothing. We had averaged each game's two top cleaners, which put the
@@ -203,7 +204,8 @@ did at least a tenth of the town's cleaning over those steps.
 
 ## What's next (ideas, not decided)
 
-- **Newcomers in a co-op town:** done, in [02b-coop-newcomers.md](02b-coop-newcomers.md).
+- **Newcomers in a co-op town:** done, in [02b-coop-newcomers.md](02b-coop-newcomers.md), and
+  losing one cleaner in [02c-losing-a-cleaner.md](02c-losing-a-cleaner.md).
 - **Longer runs:** does 2% take off later, and do the co-op towns hold for 100M steps?
 - **The AI raising its cut:** a co-op that starts at 10% and keeps more for itself over time is
   enshittification in miniature. When does the town stop cleaning?

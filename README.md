@@ -7,7 +7,7 @@ undo **enshittification**: products and places that start out good, lock people 
 squeeze them. The tool is DeepMind's [Melting Pot](https://github.com/google-deepmind/meltingpot),
 a set of small games where AI agents share, team up, or cheat each other.
 
-**Status (2026-11-22): experiments 1 and 2 have had their first rounds.** Four towns play Clean
+**Status (2026-11-23): experiments 1 and 2 have had their first rounds.** Four towns play Clean
 Up, a game where a shared river must be kept clean for apples to grow: strangers, neighbours, a
 town with an AI that connects people (it shows who has been cleaning), and a town with an AI that
 isolates them (feed tiles pay a small private reward to whoever stands on them, like an
@@ -18,13 +18,17 @@ town's feed drew its players away from the river; the other towns came out alike
 its river clean. In experiment 2 the connecting AI acts as a co-op instead: it pays a small share
 of every apple eaten (5-10% was enough) to whoever cleaned lately, and the town eats about 50
 times as much. One player becomes the town's full-time cleaner. Free riders moving in don't hurt
-it, but when that cleaner leaves, the town falls back and doesn't recover in 20M steps.
+it. When that cleaner leaves, the clean river is gone at once. With one player from another
+co-op town in its seat, three towns of four came back after 9-11M steps, when one of the town's
+own players took the job. With three players from towns without the co-op, it didn't come back
+in 20M steps. A town with two cleaners held when it lost one: the other doubled up.
 
 - [docs/experiments/01-newcomers.md](docs/experiments/01-newcomers.md): experiment 1, the
   write-up.
 - [docs/experiments/02-coop.md](docs/experiments/02-coop.md): experiment 2, the co-op, and
   [02b-coop-newcomers.md](docs/experiments/02b-coop-newcomers.md), part 2: newcomers in a co-op
-  town.
+  town, and [02c-losing-a-cleaner.md](docs/experiments/02c-losing-a-cleaner.md), part 3: losing
+  one cleaner.
 - [docs/PLAN.md](docs/PLAN.md): the idea, the ground rules, decisions. Start here.
 - [docs/QUESTIONS.md](docs/QUESTIONS.md): every open question, parked until we take it up.
 - [docs/MELTING-POT.md](docs/MELTING-POT.md): Melting Pot, how to run it, and experiment 1's
